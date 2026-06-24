@@ -26,135 +26,132 @@
  */
 package org.hbase.async;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-import static org.mockito.Matchers.any;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.Assert.*;
 
+import static org.mockito.Mockito.*;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 
+
+import com.google.common.collect.Lists;
 import org.hbase.async.Scanner.OpenScannerRequest;
 import org.hbase.async.Scanner.Response;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
+
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+
 import org.powermock.reflect.Whitebox;
 
-import com.google.common.collect.Lists;
 import com.stumbleupon.async.Deferred;
 import com.stumbleupon.async.DeferredGroupException;
 
-@RunWith(PowerMockRunner.class)
-//"Classloader hell"...  It's real.  Tell PowerMock to ignore these classes
-//because they fiddle with the class loader.  We don't test them anyway.
-@PowerMockIgnore({"javax.management.*", "javax.xml.*",
-             "ch.qos.*", "org.slf4j.*",
-             "com.sum.*", "org.xml.*"})
-@PrepareForTest({ HBaseClient.class, RegionClient.class, RegionInfo.class, 
-  HBaseRpc.class, RegionClientStats.class, Scanner.class, HBaseRpc.class,
-  DeferredGroupException.class })
 public class TestHBaseClientLocateRegion extends BaseTestHBaseClient {
   private Deferred<Object> root_deferred;
   private GetRequest get;
-  
+
   @Before
   public void beforeLocal() throws Exception {
     root_deferred = new Deferred<Object>();
     when(zkclient.getDeferredRoot()).thenReturn(root_deferred);
     get = new GetRequest(TABLE, KEY);
-    Whitebox.setInternalState(client, "has_root", true);
+    Field has_rootField = client.getClass().getDeclaredField("has_root");
+    has_rootField.setAccessible(true);
+    has_rootField.set(client, true);
   }
-  
+
   //-------- ROOT AND DEAD ROOT CLIENT ----------
   @Test
   public void locateRegionRoot98HadRootLookupInZK() throws Exception {
-    final Object obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.HBASE98_ROOT, EMPTY_ARRAY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.HBASE98_ROOT.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Object obj = locateRegionMethod.invoke(client, get, HBaseClient.HBASE98_ROOT, EMPTY_ARRAY);
     assertTrue(root_deferred == obj);
     assertCounters(0, 0, 0);
   }
-  
+
   @Test
   public void locateRegionRootHadRootLookupInZK() throws Exception {
-    final Object obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.ROOT, EMPTY_ARRAY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.ROOT.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Object obj = locateRegionMethod.invoke(client, get, HBaseClient.ROOT, EMPTY_ARRAY);
     assertTrue(root_deferred == obj);
     assertCounters(0, 0, 0);
   }
-  
+
   @Test
   public void locateRegionRootNoRootLookupInZK() throws Exception {
-    Whitebox.setInternalState(client, "has_root", false);
-    
-    final Object obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.ROOT, EMPTY_ARRAY);
+    Field has_rootField = client.getClass().getDeclaredField("has_root");
+    has_rootField.setAccessible(true);
+    has_rootField.set(client, false);
+
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.ROOT.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Object obj = locateRegionMethod.invoke(client, get, HBaseClient.ROOT, EMPTY_ARRAY);
     assertTrue(root_deferred == obj);
     assertCounters(0, 0, 0);
   }
-  
+
   //--------- META AND DEAD ROOT CLIENT ------------
   @Test
   public void locateRegionMetaHadRootLookupInZK() throws Exception {
-    final Object obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.META, EMPTY_ARRAY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Object obj = locateRegionMethod.invoke(client, get, HBaseClient.META, EMPTY_ARRAY);
     assertTrue(root_deferred == obj);
     assertCounters(0, 0, 0);
   }
-  
+
   @Test
   public void locateRegionMeta96HadRootLookupInZK() throws Exception {
-    final Object obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.HBASE96_META, EMPTY_ARRAY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.HBASE96_META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Object obj = locateRegionMethod.invoke(client, get, HBaseClient.HBASE96_META, EMPTY_ARRAY);
     assertTrue(root_deferred == obj);
     assertCounters(0, 0, 0);
   }
-  
+
   @Test
   public void locateRegionMetaNoRootLookupInZK() throws Exception {
-    Whitebox.setInternalState(client, "has_root", false);
-    
-    final Object obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.META, EMPTY_ARRAY);
+    Field has_rootField = client.getClass().getDeclaredField("has_root");
+    has_rootField.setAccessible(true);
+    has_rootField.set(client, false);
+
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Object obj = locateRegionMethod.invoke(client, get, HBaseClient.META, EMPTY_ARRAY);
     assertTrue(root_deferred == obj);
     assertCounters(0, 0, 0);
   }
-  
+
   @Test
   public void locateRegionMeta96NoRootLookupInZK() throws Exception {
-    Whitebox.setInternalState(client, "has_root", false);
-    
-    final Object obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.HBASE96_META, EMPTY_ARRAY);
+    Field has_rootField = client.getClass().getDeclaredField("has_root");
+    has_rootField.setAccessible(true);
+    has_rootField.set(client, false);
+
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.HBASE96_META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Object obj = locateRegionMethod.invoke(client, get, HBaseClient.HBASE96_META, EMPTY_ARRAY);
     assertTrue(root_deferred == obj);
     assertCounters(0, 0, 0);
   }
-  
+
   @Test
   public void locateRegionMeta98SplitMetaLookupInZK() throws Exception {
     client.has_root = true;
     client.split_meta = true;
-    
-    final Object obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.HBASE96_META, EMPTY_ARRAY);
+
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.HBASE96_META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Object obj = locateRegionMethod.invoke(client, get, HBaseClient.HBASE96_META, EMPTY_ARRAY);
     assertTrue(root_deferred == obj);
     assertCounters(0, 0, 0);
   }
-  
+
   // --------------- ROOT RECURSION --------------
   // These make sure we don't check the root region for the root region
   // because that would be plain silly.
@@ -162,110 +159,125 @@ public class TestHBaseClientLocateRegion extends BaseTestHBaseClient {
   @Test
   public void locateRegionRootHadRootLiveClient() throws Exception {
     setLiveRootClient();
-    
-    final Object obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.ROOT, EMPTY_ARRAY);
+
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.ROOT.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Object obj = locateRegionMethod.invoke(client, get, HBaseClient.ROOT, EMPTY_ARRAY);
     assertTrue(root_deferred != obj);
     assertNull(((Deferred<Object>)obj).joinUninterruptibly());
     assertCounters(0, 0, 0);
   }
-  
+
   //--------------- META LOOKUP IN ROOT --------------
   
   @Test
   public void locateRegionMetaLiveRootClient() throws Exception {
     clearCaches();
-    final RegionInfo ri = new RegionInfo(HBaseClient.ROOT, 
+    final RegionInfo ri = new RegionInfo(HBaseClient.ROOT,
         HBaseClient.ROOT_REGION, EMPTY_ARRAY);
     final byte[] meta_key = HBaseClient.createRegionSearchKey(
         HBaseClient.META, EMPTY_ARRAY, false);
     final byte[] key = HBaseClient.createRegionSearchKey(HBaseClient.META, meta_key);
-    Whitebox.setInternalState(client, "rootregion", rootclient);
+    Field rootregionField = client.getClass().getDeclaredField("rootregion");
+    rootregionField.setAccessible(true);
+    rootregionField.set(client, rootclient);
     when(rootclient.isAlive()).thenReturn(true);
-    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class), 
+    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class),
         any(byte[].class), any(byte[].class)))
-      .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(metaRow()));
-    
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.META, EMPTY_ARRAY);
-      
-    verify(rootclient, times(1)).getClosestRowBefore(ri, 
+        .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(metaRow()));
+
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, HBaseClient.META, EMPTY_ARRAY);
+
+    verify(rootclient, times(1)).getClosestRowBefore(ri,
         HBaseClient.ROOT, key, HBaseClient.INFO);
     assertTrue(root_deferred != obj);
-    final RegionClient rc = (RegionClient) obj.joinUninterruptibly();
+    final RegionClient rc = (RegionClient)obj.joinUninterruptibly();
     assertCounters(1, 0, 0);
     assertEquals(1, client2regions.size());
     assertNotNull(client2regions.get(rc));
   }
-  
+
   @Test
   public void locateRegionMetaSplitMetaLiveRootClient() throws Exception {
     clearCaches();
-    final RegionInfo ri = new RegionInfo(HBaseClient.HBASE98_ROOT, 
+    final RegionInfo ri = new RegionInfo(HBaseClient.HBASE98_ROOT,
         HBaseClient.HBASE98_ROOT_REGION, EMPTY_ARRAY);
     final byte[] meta_key = HBaseClient.createRegionSearchKey(
         HBaseClient.HBASE96_META, EMPTY_ARRAY, false);
     final byte[] key = HBaseClient.createRegionSearchKey(HBaseClient.HBASE96_META, meta_key);
     client.split_meta = true;
-    Whitebox.setInternalState(client, "rootregion", rootclient);
+    Field rootregionField = client.getClass().getDeclaredField("rootregion");
+    rootregionField.setAccessible(true);
+    rootregionField.set(client, rootclient);
     when(rootclient.isAlive()).thenReturn(true);
-    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class), 
+    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class),
         any(byte[].class), any(byte[].class)))
-      .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(metaRow()));
-    
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.HBASE96_META, EMPTY_ARRAY);
-    
-    verify(rootclient, times(1)).getClosestRowBefore(ri, 
+        .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(metaRow()));
+
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.HBASE96_META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, HBaseClient.HBASE96_META, EMPTY_ARRAY);
+
+    verify(rootclient, times(1)).getClosestRowBefore(ri,
         HBaseClient.HBASE98_ROOT, key, HBaseClient.INFO);
     assertTrue(root_deferred != obj);
-    final RegionClient rc = (RegionClient) obj.joinUninterruptibly();
+    final RegionClient rc = (RegionClient)obj.joinUninterruptibly();
     assertCounters(1, 0, 0);
     assertEquals(1, client2regions.size());
     assertNotNull(client2regions.get(rc));
   }
-  
+
   @Test
   public void locateRegionMetaSplitScanMetaLiveRootClient() throws Exception {
     clearCaches();
-    final RegionInfo ri = new RegionInfo(HBaseClient.HBASE98_ROOT, 
+    final RegionInfo ri = new RegionInfo(HBaseClient.HBASE98_ROOT,
         HBaseClient.HBASE98_ROOT_REGION, EMPTY_ARRAY);
     final byte[] meta_key = HBaseClient.createRegionSearchKey(
         HBaseClient.HBASE96_META, EMPTY_ARRAY, false);
     final byte[] key = HBaseClient.createRegionSearchKey(
         HBaseClient.HBASE96_META, meta_key);
     client.split_meta = true;
-    Whitebox.setInternalState(client, "rootregion", rootclient);
-    Whitebox.setInternalState(client, "scan_meta", true);
+    Field rootregionField = client.getClass().getDeclaredField("rootregion");
+    rootregionField.setAccessible(true);
+    rootregionField.set(client, rootclient);
+    Field scan_metaField = client.getClass().getDeclaredField("scan_meta");
+    scan_metaField.setAccessible(true);
+    scan_metaField.set(client, true);
     when(rootclient.isAlive()).thenReturn(true);
     doReturn(Deferred.<ArrayList<KeyValue>>fromResult(metaRow()))
-      .when(client).scanMeta(any(RegionClient.class), any(RegionInfo.class), any(byte[].class), 
+        .when(client).scanMeta(any(RegionClient.class), any(RegionInfo.class), any(byte[].class),
         any(byte[].class), any(byte[].class));
-    
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.HBASE96_META, EMPTY_ARRAY);
-    
-    verify(client, times(1)).scanMeta(rootclient, ri, 
+
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.HBASE96_META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, HBaseClient.HBASE96_META, EMPTY_ARRAY);
+
+    verify(client, times(1)).scanMeta(rootclient, ri,
         HBaseClient.HBASE98_ROOT, key, HBaseClient.INFO);
     assertTrue(root_deferred != obj);
-    final RegionClient rc = (RegionClient) obj.joinUninterruptibly();
+    final RegionClient rc = (RegionClient)obj.joinUninterruptibly();
     assertCounters(1, 0, 0);
     assertEquals(1, client2regions.size());
     assertNotNull(client2regions.get(rc));
   }
-  
+
   @Test
   public void locateRegionMetaLiveRootClientTableNotFound() throws Exception {
-    Whitebox.setInternalState(client, "rootregion", rootclient);
+    Field rootregionField = client.getClass().getDeclaredField("rootregion");
+    rootregionField.setAccessible(true);
+    rootregionField.set(client, rootclient);
     when(rootclient.isAlive()).thenReturn(true);
-    
-    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class), 
+
+    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class),
         any(byte[].class), any(byte[].class)))
-      .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(
-          new ArrayList<KeyValue>(0)));
-    
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.META, EMPTY_ARRAY);
+        .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(
+            new ArrayList<KeyValue>(0)));
+
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, HBaseClient.META, EMPTY_ARRAY);
     assertTrue(root_deferred != obj);
     assertCounters(1, 0, 0);
     assertEquals(2, client2regions.size());
@@ -278,13 +290,15 @@ public class TestHBaseClientLocateRegion extends BaseTestHBaseClient {
     }
     assertArrayEquals(HBaseClient.META, ex.getTable());
   }
-  
+
   @Test
   public void locateRegionMetaLiveRootClientRecoverableException() throws Exception {
-    Whitebox.setInternalState(client, "rootregion", rootclient);
+    Field rootregionField = client.getClass().getDeclaredField("rootregion");
+    rootregionField.setAccessible(true);
+    rootregionField.set(client, rootclient);
     when(rootclient.isAlive()).thenReturn(true);
-    
-    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class), 
+
+    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class),
         any(byte[].class), any(byte[].class)))
         .thenReturn(Deferred.<ArrayList<KeyValue>>fromError(
             new RegionOfflineException(EMPTY_ARRAY)))
@@ -294,196 +308,226 @@ public class TestHBaseClientLocateRegion extends BaseTestHBaseClient {
             new RegionOfflineException(EMPTY_ARRAY)))
         .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(metaRow()));
 
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.META, EMPTY_ARRAY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, HBaseClient.META, EMPTY_ARRAY);
     assertTrue(root_deferred != obj);
     assertCounters(4, 0, 0);
     assertEquals(3, client2regions.size());
     final RegionClient rc = (RegionClient)obj.joinUninterruptibly();
     assertNotNull(client2regions.get(rc));
   }
-  
+
   // This used to be a tight loop that would continue indefinitely since we 
   // didn't track how many times we looped.
   @Test
   public void locateRegionMetaLiveRootClientTooManyAttempts() throws Exception {
-    Whitebox.setInternalState(client, "rootregion", rootclient);
+    Field rootregionField = client.getClass().getDeclaredField("rootregion");
+    rootregionField.setAccessible(true);
+    rootregionField.set(client, rootclient);
     when(rootclient.isAlive()).thenReturn(true);
-    
+
     final Deferred<Object> deferred = get.getDeferred();
-    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class), 
+    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class),
         any(byte[].class), any(byte[].class)))
         .thenAnswer(new Answer<Deferred<ArrayList<KeyValue>>>() {
           @Override
           public Deferred<ArrayList<KeyValue>> answer(InvocationOnMock invocation)
               throws Throwable {
             return Deferred.<ArrayList<KeyValue>>fromError(
-              new RegionOfflineException(EMPTY_ARRAY));
+                new RegionOfflineException(EMPTY_ARRAY));
           }
         });
 
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.META, EMPTY_ARRAY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, HBaseClient.META, EMPTY_ARRAY);
     assertTrue(root_deferred != obj);
     assertCounters(12, 0, 0);
     assertEquals(2, client2regions.size());
     try {
       obj.joinUninterruptibly();
       fail("Expected a NonRecoverableException exception");
-    } catch (NonRecoverableException e) { }
+    } catch (NonRecoverableException e) {
+    }
     try {
       deferred.join();
       fail("Expected a NonRecoverableException exception");
-    } catch (NonRecoverableException e) { }
+    } catch (NonRecoverableException e) {
+    }
   }
-  
-  @Test (expected = RuntimeException.class)
+
+  @Test(expected = RuntimeException.class)
   public void locateRegionMetaLiveRootClientNonRecoverableException() throws Exception {
-    Whitebox.setInternalState(client, "rootregion", rootclient);
+    Field rootregionField = client.getClass().getDeclaredField("rootregion");
+    rootregionField.setAccessible(true);
+    rootregionField.set(client, rootclient);
     when(rootclient.isAlive()).thenReturn(true);
-    
-    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class), 
+
+    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class),
         any(byte[].class), any(byte[].class)))
         .thenReturn(Deferred.<ArrayList<KeyValue>>fromError(
             new RuntimeException("Boo!")));
 
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.META, EMPTY_ARRAY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, HBaseClient.META, EMPTY_ARRAY);
     assertTrue(root_deferred != obj);
     assertCounters(1, 0, 0);
     assertEquals(2, client2regions.size());
     obj.joinUninterruptibly();
   }
-  
+
   @Test
   public void locateRegionMetaLiveRootClientNSREdDueToSplit() throws Exception {
-    Whitebox.setInternalState(client, "rootregion", rootclient);
+    Field rootregionField = client.getClass().getDeclaredField("rootregion");
+    rootregionField.setAccessible(true);
+    rootregionField.set(client, rootclient);
     when(rootclient.isAlive()).thenReturn(true);
 
     final ArrayList<KeyValue> row = new ArrayList<KeyValue>(2);
     // Don't know if this is valid to be online and splitting. Prolly is
     row.add(metaRegionInfo(EMPTY_ARRAY, EMPTY_ARRAY, false, true, TABLE));
     row.add(new KeyValue(meta.name(), INFO, SERVER, "localhost:54321".getBytes()));
-    
-    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class), 
+
+    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class),
         any(byte[].class), any(byte[].class)))
         .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(row));
 
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.META, EMPTY_ARRAY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, HBaseClient.META, EMPTY_ARRAY);
     assertTrue(root_deferred != obj);
     assertCounters(1, 0, 0);
     assertEquals(2, client2regions.size());
     assertNull(obj.joinUninterruptibly());
   }
-  
+
   @Test
   public void locateRegionMetaLiveRootClientOffline() throws Exception {
-    Whitebox.setInternalState(client, "rootregion", rootclient);
+    Field rootregionField = client.getClass().getDeclaredField("rootregion");
+    rootregionField.setAccessible(true);
+    rootregionField.set(client, rootclient);
     when(rootclient.isAlive()).thenReturn(true);
 
     final ArrayList<KeyValue> row = new ArrayList<KeyValue>(2);
     row.add(metaRegionInfo(EMPTY_ARRAY, EMPTY_ARRAY, true, false, TABLE));
     row.add(new KeyValue(meta.name(), INFO, SERVER, "localhost:54321".getBytes()));
-    
-    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class), 
+
+    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class),
         any(byte[].class), any(byte[].class)))
         .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(row))
         .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(metaRow()));
 
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.META, EMPTY_ARRAY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, HBaseClient.META, EMPTY_ARRAY);
     assertTrue(root_deferred != obj);
     assertCounters(2, 0, 0);
     assertEquals(3, client2regions.size());
     final RegionClient rc = (RegionClient)obj.joinUninterruptibly();
     assertNotNull(client2regions.get(rc));
   }
-  
-  @Test (expected = BrokenMetaException.class)
+
+  @Test(expected = BrokenMetaException.class)
   public void locateRegionMetaLiveRootClientBrokenMeta() throws Exception {
-    Whitebox.setInternalState(client, "rootregion", rootclient);
+    Field rootregionField = client.getClass().getDeclaredField("rootregion");
+    rootregionField.setAccessible(true);
+    rootregionField.set(client, rootclient);
     when(rootclient.isAlive()).thenReturn(true);
 
     final ArrayList<KeyValue> row = new ArrayList<KeyValue>(2);
     row.add(metaRegionInfo(EMPTY_ARRAY, EMPTY_ARRAY, false, false, TABLE));
     row.add(new KeyValue(meta.name(), INFO, SERVER, "localhost:myport".getBytes()));
-    
-    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class), 
+
+    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class),
         any(byte[].class), any(byte[].class)))
         .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(row));
 
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.META, EMPTY_ARRAY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, HBaseClient.META, EMPTY_ARRAY);
     assertTrue(root_deferred != obj);
     assertCounters(1, 0, 0);
     assertEquals(2, client2regions.size());
     obj.joinUninterruptibly();
   }
-  
+
   // -------------- GENERAL LOOKUP ------------
   @Test
   public void locateRegionLookupInZK() throws Exception {
-    
-    final Object obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, TABLE, EMPTY_ARRAY);
+
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, TABLE.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Object obj = locateRegionMethod.invoke(client, get, TABLE, EMPTY_ARRAY);
     assertTrue(root_deferred == obj);
     assertCounters(0, 0, 0);
   }
-  
+
   //--------------- TABLE LOOKUP IN META --------------
   
   @Test
   public void locateRegionInMeta() throws Exception {
     clearCaches();
-    
-    Whitebox.setInternalState(client, "has_root", false);
-    
+
+    Field has_rootField = client.getClass().getDeclaredField("has_root");
+    has_rootField.setAccessible(true);
+    has_rootField.set(client, false);
+
     when(rootclient.isAlive()).thenReturn(true);
     when(rootclient.acquireMetaLookupPermit()).thenReturn(true);
-    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class), 
+    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class),
         any(byte[].class), any(byte[].class)))
-      .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(metaRow()));
-    
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, TABLE, KEY);
+        .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(metaRow()));
+
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, TABLE.getClass(), KEY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, TABLE, KEY);
     assertTrue(root_deferred != obj);
-    final RegionClient rc = (RegionClient) obj.join(1);
+    final RegionClient rc = (RegionClient)obj.join(1);
     assertCounters(0, 1, 0);
     assertEquals(1, client2regions.size());
     assertNotNull(client2regions.get(rc));
   }
-  
+
   @Test
   public void locateRegionInMetaNoSuchTable() throws Exception {
     clearCaches();
-    
-    Whitebox.setInternalState(client, "has_root", false);
-    
+
+    Field has_rootField = client.getClass().getDeclaredField("has_root");
+    has_rootField.setAccessible(true);
+    has_rootField.set(client, false);
+
     when(rootclient.isAlive()).thenReturn(true);
     when(rootclient.acquireMetaLookupPermit()).thenReturn(true);
-    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class), 
+    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class),
         any(byte[].class), any(byte[].class)))
-      .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(new ArrayList<KeyValue>(0)));
-    
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, HBaseClient.META, EMPTY_ARRAY);
+        .thenReturn(Deferred.<ArrayList<KeyValue>>fromResult(new ArrayList<KeyValue>(0)));
+
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, HBaseClient.META.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, HBaseClient.META, EMPTY_ARRAY);
     assertTrue(root_deferred != obj);
     try {
       obj.join(1);
       fail("Expected TableNotFoundException");
-    } catch (TableNotFoundException e) { }
+    } catch (TableNotFoundException e) {
+    }
     assertCounters(0, 1, 0);
     assertEquals(0, client2regions.size());
   }
-  
+
   @Test
   public void locateRegionInMetaScan() throws Exception {
     clearCaches();
-    
-    Whitebox.setInternalState(client, "has_root", false);
-    Whitebox.setInternalState(client, "scan_meta", true);
-    
+
+    Field has_rootField = client.getClass().getDeclaredField("has_root");
+    has_rootField.setAccessible(true);
+    has_rootField.set(client, false);
+    Field scan_metaField = client.getClass().getDeclaredField("scan_meta");
+    scan_metaField.setAccessible(true);
+    scan_metaField.set(client, true);
+
     when(rootclient.isAlive()).thenReturn(true);
     when(rootclient.acquireMetaLookupPermit()).thenReturn(true);
     doAnswer(new Answer<Void>() {
@@ -491,28 +535,33 @@ public class TestHBaseClientLocateRegion extends BaseTestHBaseClient {
       public Void answer(InvocationOnMock invocation) throws Throwable {
         final ArrayList<ArrayList<KeyValue>> rows = Lists.newArrayList();
         rows.add(metaRow());
-        ((HBaseRpc) invocation.getArguments()[0]).getDeferred()
-          .callback(new Response(0, rows, false, true));
+        ((HBaseRpc)invocation.getArguments()[0]).getDeferred()
+            .callback(new Response(0, rows, false, true));
         return null;
       }
     }).when(rootclient).sendRpc(any(OpenScannerRequest.class));
 
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, TABLE, KEY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, TABLE.getClass(), KEY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, TABLE, KEY);
     assertTrue(root_deferred != obj);
-    final RegionClient rc = (RegionClient) obj.join(1);
+    final RegionClient rc = (RegionClient)obj.join(1);
     assertCounters(0, 1, 0);
     assertEquals(1, client2regions.size());
     assertNotNull(client2regions.get(rc));
   }
-  
+
   @Test
   public void locateRegionInMetaSwitchToScan() throws Exception {
     clearCaches();
-    
-    Whitebox.setInternalState(client, "has_root", false);
-    Whitebox.setInternalState(client, "scan_meta", false);
-    
+
+    Field has_rootField = client.getClass().getDeclaredField("has_root");
+    has_rootField.setAccessible(true);
+    has_rootField.set(client, false);
+    Field scan_metaField = client.getClass().getDeclaredField("scan_meta");
+    scan_metaField.setAccessible(true);
+    scan_metaField.set(client, false);
+
     when(rootclient.isAlive()).thenReturn(true);
     when(rootclient.acquireMetaLookupPermit()).thenReturn(true);
     doAnswer(new Answer<Deferred<ArrayList<KeyValue>>>() {
@@ -529,29 +578,34 @@ public class TestHBaseClientLocateRegion extends BaseTestHBaseClient {
       public Void answer(InvocationOnMock invocation) throws Throwable {
         final ArrayList<ArrayList<KeyValue>> rows = Lists.newArrayList();
         rows.add(metaRow());
-        ((HBaseRpc) invocation.getArguments()[0]).getDeferred()
-          .callback(new Response(0, rows, false, true));
+        ((HBaseRpc)invocation.getArguments()[0]).getDeferred()
+            .callback(new Response(0, rows, false, true));
         return null;
       }
     }).when(rootclient).sendRpc(any(OpenScannerRequest.class));
 
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, TABLE, KEY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, TABLE.getClass(), KEY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, TABLE, KEY);
     assertTrue(root_deferred != obj);
-    final RegionClient rc = (RegionClient) obj.join(1);
+    final RegionClient rc = (RegionClient)obj.join(1);
     assertCounters(0, 2, 0);
     assertEquals(1, client2regions.size());
     assertNotNull(client2regions.get(rc));
-    assertTrue((boolean) (Boolean) Whitebox.getInternalState(client, "scan_meta"));
+    assertTrue((boolean)(Boolean)Whitebox.getInternalState(client, "scan_meta"));
   }
-  
+
   @Test
   public void locateRegionInMetaSwitchToScanDGE() throws Exception {
     clearCaches();
-    
-    Whitebox.setInternalState(client, "has_root", false);
-    Whitebox.setInternalState(client, "scan_meta", false);
-    
+
+    Field has_rootField = client.getClass().getDeclaredField("has_root");
+    has_rootField.setAccessible(true);
+    has_rootField.set(client, false);
+    Field scan_metaField = client.getClass().getDeclaredField("scan_meta");
+    scan_metaField.setAccessible(true);
+    scan_metaField.set(client, false);
+
     when(rootclient.isAlive()).thenReturn(true);
     when(rootclient.acquireMetaLookupPermit()).thenReturn(true);
     doAnswer(new Answer<Deferred<ArrayList<KeyValue>>>() {
@@ -570,29 +624,34 @@ public class TestHBaseClientLocateRegion extends BaseTestHBaseClient {
       public Void answer(InvocationOnMock invocation) throws Throwable {
         final ArrayList<ArrayList<KeyValue>> rows = Lists.newArrayList();
         rows.add(metaRow());
-        ((HBaseRpc) invocation.getArguments()[0]).getDeferred()
-          .callback(new Response(0, rows, false, true));
+        ((HBaseRpc)invocation.getArguments()[0]).getDeferred()
+            .callback(new Response(0, rows, false, true));
         return null;
       }
     }).when(rootclient).sendRpc(any(OpenScannerRequest.class));
 
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, TABLE, KEY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, TABLE.getClass(), KEY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, TABLE, KEY);
     assertTrue(root_deferred != obj);
-    final RegionClient rc = (RegionClient) obj.join(1);
+    final RegionClient rc = (RegionClient)obj.join(1);
     assertCounters(0, 2, 0);
     assertEquals(1, client2regions.size());
     assertNotNull(client2regions.get(rc));
-    assertTrue((boolean) (Boolean) Whitebox.getInternalState(client, "scan_meta"));
+    assertTrue((boolean)(Boolean)Whitebox.getInternalState(client, "scan_meta"));
   }
-  
+
   @Test
   public void locateRegionInMetaSwitchToScanDiffError() throws Exception {
     clearCaches();
-    
-    Whitebox.setInternalState(client, "has_root", false);
-    Whitebox.setInternalState(client, "scan_meta", false);
-    
+
+    Field has_rootField = client.getClass().getDeclaredField("has_root");
+    has_rootField.setAccessible(true);
+    has_rootField.set(client, false);
+    Field scan_metaField = client.getClass().getDeclaredField("scan_meta");
+    scan_metaField.setAccessible(true);
+    scan_metaField.set(client, false);
+
     when(rootclient.isAlive()).thenReturn(true);
     when(rootclient.acquireMetaLookupPermit()).thenReturn(true);
     doAnswer(new Answer<Deferred<ArrayList<KeyValue>>>() {
@@ -609,111 +668,131 @@ public class TestHBaseClientLocateRegion extends BaseTestHBaseClient {
       public Void answer(InvocationOnMock invocation) throws Throwable {
         final ArrayList<ArrayList<KeyValue>> rows = Lists.newArrayList();
         rows.add(metaRow());
-        ((HBaseRpc) invocation.getArguments()[0]).getDeferred()
-          .callback(new Response(0, rows, false, true));
+        ((HBaseRpc)invocation.getArguments()[0]).getDeferred()
+            .callback(new Response(0, rows, false, true));
         return null;
       }
     }).when(rootclient).sendRpc(any(OpenScannerRequest.class));
 
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, TABLE, KEY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, TABLE.getClass(), KEY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, TABLE, KEY);
     assertTrue(root_deferred != obj);
     try {
-      final RegionClient rc = (RegionClient) obj.join(1);
+      final RegionClient rc = (RegionClient)obj.join(1);
       fail("Expected TableNotFoundException");
-    } catch (TableNotFoundException e) { }
+    } catch (TableNotFoundException e) {
+    }
     assertCounters(0, 1, 0);
     assertEquals(0, client2regions.size());
-    assertFalse((boolean) (Boolean) Whitebox.getInternalState(client, "scan_meta"));
+    assertFalse((boolean)(Boolean)Whitebox.getInternalState(client, "scan_meta"));
   }
-  
+
   @Test
   public void locateRegionInMetaScanNoSuchTable() throws Exception {
     clearCaches();
-    
-    Whitebox.setInternalState(client, "has_root", false);
-    Whitebox.setInternalState(client, "scan_meta", true);
-    
+
+    Field has_rootField = client.getClass().getDeclaredField("has_root");
+    has_rootField.setAccessible(true);
+    has_rootField.set(client, false);
+    Field scan_metaField = client.getClass().getDeclaredField("scan_meta");
+    scan_metaField.setAccessible(true);
+    scan_metaField.set(client, true);
+
     when(rootclient.isAlive()).thenReturn(true);
     when(rootclient.acquireMetaLookupPermit()).thenReturn(true);
     doAnswer(new Answer<Void>() {
       @Override
       public Void answer(InvocationOnMock invocation) throws Throwable {
-        ((HBaseRpc) invocation.getArguments()[0]).getDeferred()
-          .callback(new Response(0, null, false, true));
+        ((HBaseRpc)invocation.getArguments()[0]).getDeferred()
+            .callback(new Response(0, null, false, true));
         return null;
       }
     }).when(rootclient).sendRpc(any(OpenScannerRequest.class));
 
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, TABLE, KEY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, TABLE.getClass(), KEY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, TABLE, KEY);
     assertTrue(root_deferred != obj);
     try {
       obj.join(1);
       fail("Expected TableNotFoundException");
-    } catch (TableNotFoundException e) { }
+    } catch (TableNotFoundException e) {
+    }
     assertCounters(0, 1, 0);
     assertEquals(0, client2regions.size());
   }
-  
+
   @Test
   public void locateRegionInMetaScanException() throws Exception {
     clearCaches();
-    
-    Whitebox.setInternalState(client, "has_root", false);
-    Whitebox.setInternalState(client, "scan_meta", true);
-    
+
+    Field has_rootField = client.getClass().getDeclaredField("has_root");
+    has_rootField.setAccessible(true);
+    has_rootField.set(client, false);
+    Field scan_metaField = client.getClass().getDeclaredField("scan_meta");
+    scan_metaField.setAccessible(true);
+    scan_metaField.set(client, true);
+
     when(rootclient.isAlive()).thenReturn(true);
     when(rootclient.acquireMetaLookupPermit()).thenReturn(true);
     doAnswer(new Answer<Void>() {
       @Override
       public Void answer(InvocationOnMock invocation) throws Throwable {
-        ((HBaseRpc) invocation.getArguments()[0]).getDeferred()
-          .callback(new NonRecoverableException("Boo!"));
+        ((HBaseRpc)invocation.getArguments()[0]).getDeferred()
+            .callback(new NonRecoverableException("Boo!"));
         return null;
       }
     }).when(rootclient).sendRpc(any(OpenScannerRequest.class));
 
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, TABLE, KEY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, TABLE.getClass(), KEY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, get, TABLE, KEY);
     assertTrue(root_deferred != obj);
     try {
       obj.join(1);
       fail("Expected NonRecoverableException");
-    } catch (NonRecoverableException e) { }
+    } catch (NonRecoverableException e) {
+    }
     assertCounters(0, 1, 0);
     assertEquals(0, client2regions.size());
   }
-  
+
   // ---------- PARAMS -----------
-  @Test (expected = NullPointerException.class)
+  @Test(expected = NullPointerException.class)
   public void locateRegionNullTable() throws Exception {
-    Whitebox.invokeMethod(client, "locateRegion", get, (byte[])null, EMPTY_ARRAY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, ((byte[])null).getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    locateRegionMethod.invoke(client, get, (byte[])null, EMPTY_ARRAY);
   }
-  
-  @Test (expected = NullPointerException.class)
+
+  @Test(expected = NullPointerException.class)
   public void locateRegionNullKey() throws Exception {
-    Whitebox.invokeMethod(client, "locateRegion", get, TABLE, (byte[])null);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, TABLE.getClass(), ((byte[])null).getClass());
+    locateRegionMethod.setAccessible(true);
+    locateRegionMethod.invoke(client, get, TABLE, (byte[])null);
   }
-  
+
   @Test
   public void locateRegionEmptyTable() throws Exception {
     final Deferred<Object> root_deferred = new Deferred<Object>();
     when(zkclient.getDeferredRoot()).thenReturn(root_deferred);
-    
-    final Object obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, EMPTY_ARRAY, EMPTY_ARRAY);
+
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, EMPTY_ARRAY.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Object obj = locateRegionMethod.invoke(client, get, EMPTY_ARRAY, EMPTY_ARRAY);
     assertNotNull(obj);
     assertTrue(root_deferred == obj);
   }
-  
+
   @Test
   public void locateRegionEmptyKey() throws Exception {
     final Deferred<Object> root_deferred = new Deferred<Object>();
     when(zkclient.getDeferredRoot()).thenReturn(root_deferred);
-    
-    final Object obj = Whitebox.invokeMethod(client, "locateRegion", 
-        get, TABLE, EMPTY_ARRAY);
+
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, TABLE.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Object obj = locateRegionMethod.invoke(client, get, TABLE, EMPTY_ARRAY);
     assertNotNull(obj);
     assertTrue(root_deferred == obj);
   }
@@ -725,36 +804,42 @@ public class TestHBaseClientLocateRegion extends BaseTestHBaseClient {
     final Deferred<Object> root_deferred = new Deferred<Object>();
     when(zkclient.getDeferredRoot()).thenReturn(root_deferred);
 
-    final Object obj = Whitebox.invokeMethod(client, "locateRegion", 
-        (HBaseRpc)null, TABLE, EMPTY_ARRAY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, TABLE.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Object obj = locateRegionMethod.invoke(client, (HBaseRpc)null, TABLE, EMPTY_ARRAY);
     assertNotNull(obj);
     assertTrue(root_deferred == obj);
   }
-  
-  @Test (expected = NullPointerException.class)
+
+  @Test(expected = NullPointerException.class)
   public void locateRegionNullRequestNPE() throws Exception {
-    Whitebox.setInternalState(client, "rootregion", rootclient);
+    Field rootregionField = client.getClass().getDeclaredField("rootregion");
+    rootregionField.setAccessible(true);
+    rootregionField.set(client, rootclient);
     when(rootclient.isAlive()).thenReturn(true);
-    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class), 
+    when(rootclient.getClosestRowBefore(any(RegionInfo.class), any(byte[].class),
         any(byte[].class), any(byte[].class)))
         .thenAnswer(new Answer<Deferred<ArrayList<KeyValue>>>() {
           @Override
           public Deferred<ArrayList<KeyValue>> answer(InvocationOnMock invocation)
               throws Throwable {
             return Deferred.<ArrayList<KeyValue>>fromError(
-              new RegionOfflineException(EMPTY_ARRAY));
+                new RegionOfflineException(EMPTY_ARRAY));
           }
         });
-    final Deferred<Object> obj = Whitebox.invokeMethod(client, "locateRegion", 
-        (HBaseRpc)null, TABLE, EMPTY_ARRAY);
+    Method locateRegionMethod = client.getClass().getDeclaredMethod("locateRegion", HBaseRpc.class, TABLE.getClass(), EMPTY_ARRAY.getClass());
+    locateRegionMethod.setAccessible(true);
+    Deferred obj = (Deferred)locateRegionMethod.invoke(client, (HBaseRpc)null, TABLE, EMPTY_ARRAY);
     obj.join();
   }
-  
+
   // ---------- HELPERS -----------
   
   /** Simply sets the root region to the root client and mocks the alive call */ 
-  private void setLiveRootClient() {
-    Whitebox.setInternalState(client, "rootregion", rootclient);
+  private void setLiveRootClient() throws Exception {
+    Field rootregionField = client.getClass().getDeclaredField("rootregion");
+    rootregionField.setAccessible(true);
+    rootregionField.set(client, rootclient);
     when(rootclient.isAlive()).thenReturn(true);
   }
 

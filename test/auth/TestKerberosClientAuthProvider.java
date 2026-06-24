@@ -26,15 +26,8 @@
  */
 package org.hbase.async.auth;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyMap;
-import static org.mockito.Matchers.anyString;
-import static org.mockito.Matchers.eq;
+import static org.junit.Assert.*;
+
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -44,7 +37,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-
 import javax.security.auth.Subject;
 import javax.security.auth.callback.Callback;
 import javax.security.auth.callback.CallbackHandler;
@@ -58,28 +50,26 @@ import javax.security.sasl.Sasl;
 import javax.security.sasl.SaslClient;
 import javax.security.sasl.SaslException;
 
+
 import org.apache.zookeeper.server.auth.KerberosName;
 import org.hbase.async.Config;
 import org.hbase.async.HBaseClient;
 import org.hbase.async.auth.KerberosClientAuthProvider.ClientCallbackHandler;
 import org.jboss.netty.util.HashedWheelTimer;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
+
+import org.mockito.MockedConstruction;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
 
-@RunWith(PowerMockRunner.class)
-@PowerMockIgnore({"javax.management.*", "javax.xml.*",
-  "ch.qos.*", "org.slf4j.*",
-  "com.sum.*", "org.xml.*"})
-@PrepareForTest({ HBaseClient.class, Login.class, Subject.class, Sasl.class,
-  SaslClient.class, KerberosName.class, KerberosClientAuthProvider.class })
 public class TestKerberosClientAuthProvider {
+  private MockedStatic<Sasl> mockedSasl;
+  private MockedStatic<Subject> mockedSubject;
+  private MockedStatic<Login> mockedLogin;
   private HBaseClient client;
   private Config config;
   private Login login;
@@ -94,39 +84,36 @@ public class TestKerberosClientAuthProvider {
   private String service_name;
   private String service_hostname;
   private Map<String, String> properties;
-  
+
   @SuppressWarnings("unchecked")
   @Before
   public void before() throws Exception {
-    config = new Config();
-    client = mock(HBaseClient.class);
-    login = mock(Login.class);
-    subject = mock(Subject.class);
-    sasl_client = mock(SaslClient.class);
-    principal = mock(Principal.class);
-    kerberos_name = mock(KerberosName.class);
-    
-    config.overrideConfig(KerberosClientAuthProvider.PRINCIPAL_KEY, "ephebe");
-    
-    when(client.getConfig()).thenReturn(config);
-    when(login.getSubject()).thenReturn(subject);
-    
-    principals = new HashSet<Principal>();
-    principals.add(principal);
-    when(subject.getPrincipals()).thenReturn(principals);
-    
-    PowerMockito.whenNew(KerberosName.class).withAnyArguments()
-      .thenReturn(kerberos_name);
-    when(kerberos_name.toString()).thenReturn("Aching");
-    when(kerberos_name.getServiceName()).thenReturn("feegle");
-    when(kerberos_name.getHostName()).thenReturn("ephebe");
-    
-    PowerMockito.mockStatic(Login.class);
-    PowerMockito.when(Login.getCurrentLogin()).thenReturn(login);
-    
-    PowerMockito.mockStatic(Sasl.class);
-    PowerMockito.when(Sasl.createSaslClient(any(String[].class), anyString(), 
-        anyString(), anyString(), anyMap(), any(CallbackHandler.class)))
+    try (MockedConstruction<KerberosName> mockKerberosName = Mockito.mockConstruction(KerberosName.class)) {
+      mockedSasl = Mockito.mockStatic(Sasl.class);
+      mockedSubject = Mockito.mockStatic(Subject.class);
+      mockedLogin = Mockito.mockStatic(Login.class);
+      config = new Config();
+      client = mock(HBaseClient.class);
+      login = mock(Login.class);
+      subject = mock(Subject.class);
+      sasl_client = mock(SaslClient.class);
+      principal = mock(Principal.class);
+      kerberos_name = mock(KerberosName.class);
+
+      config.overrideConfig(KerberosClientAuthProvider.PRINCIPAL_KEY, "ephebe");
+
+      when(client.getConfig()).thenReturn(config);
+      when(login.getSubject()).thenReturn(subject);
+
+      principals = new HashSet<Principal>();
+      principals.add(principal);
+      when(subject.getPrincipals()).thenReturn(principals);
+      when(kerberos_name.toString()).thenReturn("Aching");
+      when(kerberos_name.getServiceName()).thenReturn("feegle");
+      when(kerberos_name.getHostName()).thenReturn("ephebe");
+      mockedLogin.when(Login::getCurrentLogin).thenReturn(login);
+      mockedSasl.when(() -> Sasl.createSaslClient(any(String[].class), anyString(),
+          anyString(), anyString(), anyMap(), any(CallbackHandler.class)))
           .thenAnswer(new Answer<SaslClient>() {
             @Override
             public SaslClient answer(final InvocationOnMock invocation)
@@ -138,17 +125,23 @@ public class TestKerberosClientAuthProvider {
               return sasl_client;
             }
           });
-    
-    PowerMockito.mockStatic(Subject.class);
-    PowerMockito.doAnswer(new Answer<SaslClient>() {
-      @Override
-      public SaslClient answer(final InvocationOnMock invocation) throws Throwable {
-        final PrivilegedExceptionAction<SaslClient> cb = 
-            (PrivilegedExceptionAction<SaslClient>)invocation.getArguments()[1];
-        return cb.run();
-      }
-    }).when(Subject.class);
-    Subject.doAs(eq(subject), any(PrivilegedExceptionAction.class));
+      Mockito.doAnswer(new Answer<SaslClient>() {
+        @Override
+        public SaslClient answer(final InvocationOnMock invocation) throws Throwable {
+          final PrivilegedExceptionAction<SaslClient> cb =
+              (PrivilegedExceptionAction<SaslClient>)invocation.getArguments()[1];
+          return cb.run();
+        }
+      }).when(Subject.class);
+      Subject.doAs(eq(subject), any(PrivilegedExceptionAction.class));
+    }
+  }
+
+  @After(expected = IllegalStateException.class)
+  public void tearDownStaticMocks() {
+    mockedLogin.closeOnDemand();
+    mockedSubject.closeOnDemand();
+    mockedSasl.closeOnDemand();
   }
   
   @Test
@@ -160,7 +153,7 @@ public class TestKerberosClientAuthProvider {
   
   @Test (expected = IllegalStateException.class)
   public void ctorLoginFailure() throws Exception {
-    PowerMockito.doThrow(new LoginException("Boo!")).when(Login.class);
+    Mockito.doThrow(new LoginException("Boo!")).when(Login.class);
     Login.initUserIfNeeded(any(Config.class), any(HashedWheelTimer.class), 
         anyString(), any(ClientCallbackHandler.class));
     new KerberosClientAuthProvider(client);
@@ -168,7 +161,7 @@ public class TestKerberosClientAuthProvider {
   
   @Test (expected = RuntimeException.class)
   public void ctorOtherException() throws Exception {
-    PowerMockito.doThrow(new RuntimeException("Boo!")).when(Login.class);
+    Mockito.doThrow(new RuntimeException("Boo!")).when(Login.class);
     Login.initUserIfNeeded(any(Config.class), any(HashedWheelTimer.class), 
         anyString(), any(ClientCallbackHandler.class));
     new KerberosClientAuthProvider(client);
@@ -203,7 +196,7 @@ public class TestKerberosClientAuthProvider {
   @SuppressWarnings("unchecked")
   @Test (expected = IllegalStateException.class)
   public void newSaslClientFailedSubject() throws Exception {
-    PowerMockito.doThrow(new RuntimeException("Boo!")).when(Subject.class);
+    Mockito.doThrow(new RuntimeException("Boo!")).when(Subject.class);
     Subject.doAs(eq(subject), any(PrivilegedExceptionAction.class));
     
     final KerberosClientAuthProvider provider = 
@@ -215,9 +208,8 @@ public class TestKerberosClientAuthProvider {
   @SuppressWarnings("unchecked")
   @Test (expected = IllegalStateException.class)
   public void newSaslClientFailedCreation() throws Exception {
-    PowerMockito.mockStatic(Sasl.class);
-    PowerMockito.when(Sasl.createSaslClient(any(String[].class), anyString(), 
-        anyString(), anyString(), anyMap(), any(CallbackHandler.class)))
+    mockedSasl.when(() -> Sasl.createSaslClient(any(String[].class), anyString(),
+            anyString(), anyString(), anyMap(), any(CallbackHandler.class)))
         .thenThrow(new SaslException("Boo!"));
     
     final KerberosClientAuthProvider provider = 

@@ -26,43 +26,33 @@
  */
 package org.hbase.async;
 
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyInt;
-import static org.mockito.Matchers.anyMap;
-import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.security.PrivilegedExceptionAction;
-
 import javax.security.auth.Subject;
 import javax.security.sasl.SaslClient;
 
+
 import org.hbase.async.auth.ClientAuthProvider;
 import org.hbase.async.auth.KerberosClientAuthProvider;
-import org.hbase.async.auth.Login;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.Channel;
 import org.junit.Before;
-import org.junit.runner.RunWith;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+
+import org.mockito.MockedConstruction;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
 
-@RunWith(PowerMockRunner.class)
-@PowerMockIgnore({"javax.management.*", "javax.xml.*",
-  "ch.qos.*", "org.slf4j.*",
-  "com.sum.*", "org.xml.*"})
-@PrepareForTest({ HBaseClient.class, Login.class, RegionClient.class,
-  SaslClient.class, KerberosClientAuthProvider.class, SecureRpcHelper.class,
-  Subject.class })
 public class BaseTestSecureRpcHelper {
+  private MockedStatic<Subject> mockedSubject;
   protected static byte[] unwrapped_payload = 
     { 'p', 't', 'r', 'a', 'c', 'i' };
   protected static byte[] wrapped_payload = 
@@ -74,22 +64,22 @@ public class BaseTestSecureRpcHelper {
   protected SocketAddress remote_endpoint;
   protected KerberosClientAuthProvider kerberos_provider;
   protected SaslClient sasl_client;
-  
+
   @SuppressWarnings("unchecked")
   @Before
   public void before() throws Exception {
-    config = new Config();
-    client = mock(HBaseClient.class);
-    region_client = mock(RegionClient.class);
-    remote_endpoint = new InetSocketAddress("127.0.0.1", 50512);
-    kerberos_provider = mock(KerberosClientAuthProvider.class);
-    sasl_client = mock(SaslClient.class);
-    
-    when(client.getConfig()).thenReturn(config);
-    PowerMockito.whenNew(KerberosClientAuthProvider.class).withAnyArguments()
-      .thenReturn(kerberos_provider);
-    when(kerberos_provider.newSaslClient(anyString(), anyMap()))
-      .thenReturn(sasl_client);
+    try (MockedConstruction<KerberosClientAuthProvider> mockKerberosClientAuthProvider = Mockito.mockConstruction(KerberosClientAuthProvider.class)) {
+      config = new Config();
+      client = mock(HBaseClient.class);
+      region_client = mock(RegionClient.class);
+      remote_endpoint = new InetSocketAddress("127.0.0.1", 50512);
+      kerberos_provider = mock(KerberosClientAuthProvider.class);
+      sasl_client = mock(SaslClient.class);
+
+      when(client.getConfig()).thenReturn(config);
+      when(kerberos_provider.newSaslClient(anyString(), anyMap()))
+          .thenReturn(sasl_client);
+    }
   }
   
   /**
@@ -97,7 +87,8 @@ public class BaseTestSecureRpcHelper {
    */
   protected class UTHelper extends SecureRpcHelper {
     Channel chan;
-    ChannelBuffer buffer;    
+    ChannelBuffer buffer;
+    
     public UTHelper(final HBaseClient hbase_client, final RegionClient region_client,
         final SocketAddress remote_endpoint) {
       super(hbase_client, region_client, remote_endpoint);
@@ -193,8 +184,7 @@ public class BaseTestSecureRpcHelper {
 
   @SuppressWarnings("unchecked")
   protected void setupChallenge() throws Exception {
-    PowerMockito.mockStatic(Subject.class);
-    PowerMockito.doAnswer(new Answer<byte[]>() {
+    Mockito.doAnswer(new Answer<byte[]>() {
       @Override
       public byte[] answer(final InvocationOnMock invocation) throws Throwable {
         final PrivilegedExceptionAction<byte[]> cb = 
@@ -203,5 +193,15 @@ public class BaseTestSecureRpcHelper {
       }
     }).when(Subject.class);
     Subject.doAs(any(Subject.class), any(PrivilegedExceptionAction.class));
+  }
+
+  @BeforeEach
+  void setUpStaticMocks() {
+    mockedSubject = Mockito.mockStatic(Subject.class);
+  }
+
+  @AfterEach
+  void tearDownStaticMocks() {
+    mockedSubject.closeOnDemand();
   }
 }

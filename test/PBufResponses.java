@@ -29,23 +29,23 @@ package org.hbase.async;
 import java.util.AbstractMap;
 import java.util.List;
 
-import org.hbase.async.generated.ClientPB;
-import org.hbase.async.generated.ClientPB.Result;
-import org.hbase.async.generated.RPCPB;
+
+import com.google.protobuf.ByteString;
+import com.google.protobuf.CodedOutputStream;
+import com.google.protobuf.MessageLite;
 import org.hbase.async.generated.CellPB.Cell;
+import org.hbase.async.generated.ClientPB;
 import org.hbase.async.generated.ClientPB.MultiResponse;
 import org.hbase.async.generated.ClientPB.RegionActionResult;
-import org.hbase.async.generated.ClientPB.ResultOrException;
 import org.hbase.async.generated.ClientPB.RegionActionResult.Builder;
+import org.hbase.async.generated.ClientPB.Result;
+import org.hbase.async.generated.ClientPB.ResultOrException;
 import org.hbase.async.generated.HBasePB.NameBytesPair;
+import org.hbase.async.generated.RPCPB;
 import org.hbase.async.generated.RPCPB.ResponseHeader;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.junit.Ignore;
-
-import com.google.protobuf.ByteString;
-import com.google.protobuf.CodedOutputStream;
-import com.google.protobuf.GeneratedMessageLite;
 
 @Ignore // ignore for test runners
 public class PBufResponses {
@@ -80,12 +80,12 @@ public class PBufResponses {
    * @param response The response to encode
    * @return The buffer to pass upstream
    */
-  static ChannelBuffer writeToBuffer(final ResponseHeader header, 
-      final GeneratedMessageLite response) throws Exception {
+  static ChannelBuffer writeToBuffer(final ResponseHeader header,
+      final MessageLite response) throws Exception {
     final int hlen = header.getSerializedSize();
-    final int vhlen = CodedOutputStream.computeRawVarint32Size(hlen);
+    final int vhlen = CodedOutputStream.computeUInt32SizeNoTag(hlen);
     final int pblen = response != null ? response.getSerializedSize() : 0;
-    final int vlen = CodedOutputStream.computeRawVarint32Size(pblen);
+    final int vlen = CodedOutputStream.computeUInt32SizeNoTag(pblen);
     final byte[] buf = new byte[hlen + vhlen + vlen + pblen + 4];
     final CodedOutputStream out = CodedOutputStream.newInstance(buf, 4, 
         hlen + vhlen + vlen + pblen);
@@ -229,10 +229,10 @@ public class PBufResponses {
    * @param response The response to serialize
    * @return A channel buffer to parse
    */
-  static ChannelBuffer encodeResponse(final GeneratedMessageLite response) 
+  static ChannelBuffer encodeResponse(final MessageLite response)
       throws Exception {
     final int pblen = response.getSerializedSize();
-    final int vlen = CodedOutputStream.computeRawVarint32Size(pblen);
+    final int vlen = CodedOutputStream.computeUInt32SizeNoTag(pblen);
     final byte[] buf = new byte[vlen + pblen];
     final CodedOutputStream out = CodedOutputStream.newInstance(buf, 0, 
         vlen + pblen);
@@ -250,9 +250,9 @@ public class PBufResponses {
    * @throws Exception
    */
   static AbstractMap.SimpleEntry<ChannelBuffer, Integer> encodeResponseWithAssocaitedCells(
-      final GeneratedMessageLite response, final List<KeyValue> associated_cells) throws Exception {
+      final MessageLite response, final List<KeyValue> associated_cells) throws Exception {
     final int pblen = response.getSerializedSize();
-    final int vlen = CodedOutputStream.computeRawVarint32Size(pblen);
+    final int vlen = CodedOutputStream.computeUInt32SizeNoTag(pblen);
     final byte[] buf = new byte[vlen + pblen];
     final CodedOutputStream out = CodedOutputStream.newInstance(buf, 0, vlen + pblen);
 

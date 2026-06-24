@@ -26,12 +26,10 @@
  */
 package org.hbase.async;
 
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyInt;
-import static org.mockito.Matchers.anyString;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mock;
 
+import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
 import java.util.AbstractMap;
@@ -48,6 +46,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
+
 import org.hbase.async.HBaseClient.ZKClient;
 import org.jboss.netty.channel.ChannelPipeline;
 import org.jboss.netty.channel.socket.SocketChannel;
@@ -60,20 +59,22 @@ import org.jboss.netty.util.Timeout;
 import org.jboss.netty.util.TimerTask;
 import org.junit.Before;
 import org.junit.Ignore;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+
+import org.mockito.MockedConstruction;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PrepareForTest;
+
 import org.powermock.reflect.Whitebox;
 
 import com.stumbleupon.async.Deferred;
 
-@PrepareForTest({ HBaseClient.class, RegionClient.class, HBaseRpc.class, 
-  GetRequest.class, RegionInfo.class, NioClientSocketChannelFactory.class, 
-  Executors.class, HashedWheelTimer.class, NioClientBossPool.class, 
-  NioWorkerPool.class })
 @Ignore // ignore for test runners
 public class BaseTestHBaseClient {
+  private MockedStatic<Executors> mockedExecutors;
   protected static final Charset CHARSET = Charset.forName("ASCII");
   protected static final byte[] COMMA = { ',' };
   protected static final byte[] TIMESTAMP = "1234567890".getBytes();
@@ -128,69 +129,74 @@ public class BaseTestHBaseClient {
   protected SocketChannel chan;
   /** Fake timer for testing */
   protected FakeTimer timer;
-  
+
   @Before
   public void before() throws Exception {
-    region_clients.clear();
-    rootclient = mock(RegionClient.class);
-    when(rootclient.toString()).thenReturn(MOCK_ROOT_CLIENT_NAME);
-    metaclient = mock(RegionClient.class);
-    when(metaclient.toString()).thenReturn(MOCK_META_CLIENT_NAME);
-    regionclient = mock(RegionClient.class);
-    when(regionclient.toString()).thenReturn(MOCK_RS_CLIENT_NAME);
-    zkclient = mock(ZKClient.class);
-    channel_factory = mock(NioClientSocketChannelFactory.class);
-    chan = mock(SocketChannel.class);
-    timer = new FakeTimer();
-    
-    when(zkclient.getDeferredRoot()).thenReturn(new Deferred<Object>());
-    PowerMockito.mockStatic(Executors.class);
-    PowerMockito.when(Executors.defaultThreadFactory())
-      .thenReturn(mock(ThreadFactory.class));
-    PowerMockito.when(Executors.newCachedThreadPool())
-      .thenReturn(mock(ExecutorService.class));
-    PowerMockito.whenNew(NioClientSocketChannelFactory.class).withAnyArguments()
-      .thenReturn(channel_factory);
-    
-    PowerMockito.whenNew(HashedWheelTimer.class).withAnyArguments()
-      .thenReturn(timer);
-    PowerMockito.whenNew(NioClientBossPool.class).withAnyArguments()
-      .thenReturn(mock(NioClientBossPool.class));
-    PowerMockito.whenNew(NioWorkerPool.class).withAnyArguments()
-      .thenReturn(mock(NioWorkerPool.class));
-    
-    client = PowerMockito.spy(new HBaseClient("test-quorum-spec"));
-    Whitebox.setInternalState(client, "zkclient", zkclient);
-    Whitebox.setInternalState(client, "rootregion", rootclient);
-    Whitebox.setInternalState(client, "jitter_percent", 0);
-    regions_cache = Whitebox.getInternalState(client, "regions_cache");
-    region2client = Whitebox.getInternalState(client, "region2client");
-    client2regions = Whitebox.getInternalState(client, "client2regions");
-    got_nsre = Whitebox.getInternalState(client, "got_nsre");
-    ip2client = Whitebox.getInternalState(client, "ip2client");
-    injectRegionInCache(meta, metaclient, META_IP + ":" + RS_PORT);
-    injectRegionInCache(region, regionclient, REGION_CLIENT_IP + ":" + RS_PORT);
-    
-    final InetSocketAddress remote = mock(InetSocketAddress.class);
-    when(remote.toString()).thenReturn(REMOTE_ADDRESS);
-    when(chan.getRemoteAddress()).thenReturn(remote);
-    when(channel_factory.newChannel(any(ChannelPipeline.class)))
-      .thenReturn(chan);
-    when(chan.getConfig()).thenReturn(mock(SocketChannelConfig.class));
-    when(rootclient.toString()).thenReturn("Mock RootClient");
-    
-    PowerMockito.doAnswer(new Answer<RegionClient>(){
-      @Override
-      public RegionClient answer(InvocationOnMock invocation) throws Throwable {
-        final Object[] args = invocation.getArguments();
-        final String endpoint = (String)args[0] + ":" + (Integer)args[1];
-        final RegionClient rc = mock(RegionClient.class);
-        when(rc.getRemoteAddress()).thenReturn(endpoint);
-        client2regions.put(rc, new ArrayList<RegionInfo>());
-        region_clients.add(rc);
-        return rc;
+    try (MockedConstruction<NioWorkerPool> mockNioWorkerPool = Mockito.mockConstruction(NioWorkerPool.class)) {
+      try (MockedConstruction<NioClientBossPool> mockNioClientBossPool = Mockito.mockConstruction(NioClientBossPool.class)) {
+        try (MockedConstruction<HashedWheelTimer> mockHashedWheelTimer = Mockito.mockConstruction(HashedWheelTimer.class)) {
+          try (MockedConstruction<NioClientSocketChannelFactory> mockNioClientSocketChannelFactory = Mockito.mockConstruction(NioClientSocketChannelFactory.class)) {
+            region_clients.clear();
+            rootclient = mock(RegionClient.class);
+            when(rootclient.toString()).thenReturn(MOCK_ROOT_CLIENT_NAME);
+            metaclient = mock(RegionClient.class);
+            when(metaclient.toString()).thenReturn(MOCK_META_CLIENT_NAME);
+            regionclient = mock(RegionClient.class);
+            when(regionclient.toString()).thenReturn(MOCK_RS_CLIENT_NAME);
+            zkclient = mock(ZKClient.class);
+            channel_factory = mock(NioClientSocketChannelFactory.class);
+            chan = mock(SocketChannel.class);
+            timer = new FakeTimer();
+
+            when(zkclient.getDeferredRoot()).thenReturn(new Deferred<Object>());
+            mockedExecutors.when(Executors::defaultThreadFactory)
+                .thenReturn(mock(ThreadFactory.class));
+            mockedExecutors.when(Executors::newCachedThreadPool)
+                .thenReturn(mock(ExecutorService.class));
+
+            client = Mockito.spy(new HBaseClient("test-quorum-spec"));
+            Field zkclientField = client.getClass().getDeclaredField("zkclient");
+            zkclientField.setAccessible(true);
+            zkclientField.set(client, zkclient);
+            Field rootregionField = client.getClass().getDeclaredField("rootregion");
+            rootregionField.setAccessible(true);
+            rootregionField.set(client, rootclient);
+            Field jitter_percentField = client.getClass().getDeclaredField("jitter_percent");
+            jitter_percentField.setAccessible(true);
+            jitter_percentField.set(client, 0);
+            regions_cache = Whitebox.getInternalState(client, "regions_cache");
+            region2client = Whitebox.getInternalState(client, "region2client");
+            client2regions = Whitebox.getInternalState(client, "client2regions");
+            got_nsre = Whitebox.getInternalState(client, "got_nsre");
+            ip2client = Whitebox.getInternalState(client, "ip2client");
+            injectRegionInCache(meta, metaclient, META_IP + ":" + RS_PORT);
+            injectRegionInCache(region, regionclient, REGION_CLIENT_IP + ":" + RS_PORT);
+
+            final InetSocketAddress remote = mock(InetSocketAddress.class);
+            when(remote.toString()).thenReturn(REMOTE_ADDRESS);
+            when(chan.getRemoteAddress()).thenReturn(remote);
+            when(channel_factory.newChannel(any(ChannelPipeline.class)))
+                .thenReturn(chan);
+            when(chan.getConfig()).thenReturn(mock(SocketChannelConfig.class));
+            when(rootclient.toString()).thenReturn("Mock RootClient");
+
+            // PowerMock private method stubbing is not supported by Mockito. Refactor the private method to package-private or extract to a collaborator.
+            Mockito.doAnswer(new Answer<RegionClient>(){
+              @Override
+              public RegionClient answer(InvocationOnMock invocation) throws Throwable {
+                final Object[] args = invocation.getArguments();
+                final String endpoint = (String)args[0] + ":" + (Integer)args[1];
+                final RegionClient rc = mock(RegionClient.class);
+                when(rc.getRemoteAddress()).thenReturn(endpoint);
+                client2regions.put(rc, new ArrayList<RegionInfo>());
+                region_clients.add(rc);
+                return rc;
+              }
+            }).when(client, "newClient", anyString(), anyInt());
+          }
+        }
       }
-    }).when(client, "newClient", anyString(), anyInt());
+    }
   }
  
   /**
@@ -408,7 +414,7 @@ public class BaseTestHBaseClient {
     rpc.attempt = 0;
     when(rpc.getDeferred()).thenReturn(deferred);
     when(rpc.toString()).thenReturn("MockRPC");
-    PowerMockito.doAnswer(new Answer<Void>() {
+    Mockito.doAnswer(new Answer<Void>() {
       @Override
       public Void answer(InvocationOnMock invocation) throws Throwable {
         if (deferred != null) {
@@ -420,5 +426,15 @@ public class BaseTestHBaseClient {
       }
     }).when(rpc).callback(Object.class);
     return rpc;
+  }
+
+  @BeforeEach
+  void setUpStaticMocks() {
+    mockedExecutors = Mockito.mockStatic(Executors.class);
+  }
+
+  @AfterEach
+  void tearDownStaticMocks() {
+    mockedExecutors.closeOnDemand();
   }
 }

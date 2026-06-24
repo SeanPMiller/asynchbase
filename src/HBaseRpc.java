@@ -1031,12 +1031,12 @@ public abstract class HBaseRpc implements TimerTask {
   static final ChannelBuffer toChannelBuffer(final byte[] method,
                                              final AbstractMessageLite pb) {
     final int pblen = pb.getSerializedSize();
-    final int vlen = CodedOutputStream.computeRawVarint32Size(pblen);
+    final int vlen = CodedOutputStream.computeUInt32SizeNoTag(pblen);
     final byte[] buf = new byte[4 + 19 + method.length + vlen + pblen];
     try {
       final CodedOutputStream out = CodedOutputStream.newInstance(buf, 4 + 19 + method.length,
                                                                   vlen + pblen);
-      out.writeRawVarint32(pblen);
+      out.writeUInt32NoTag(pblen);
       pb.writeTo(out);
       out.checkNoSpaceLeft();
     } catch (IOException e) {

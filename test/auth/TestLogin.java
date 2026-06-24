@@ -26,21 +26,13 @@
  */
 package org.hbase.async.auth;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyLong;
-import static org.mockito.Matchers.anyString;
-import static org.mockito.Matchers.eq;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.Assert.*;
+
+import static org.mockito.Mockito.*;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
@@ -48,7 +40,6 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-
 import javax.security.auth.Subject;
 import javax.security.auth.callback.CallbackHandler;
 import javax.security.auth.kerberos.KerberosPrincipal;
@@ -58,28 +49,28 @@ import javax.security.auth.login.Configuration;
 import javax.security.auth.login.LoginContext;
 import javax.security.auth.login.LoginException;
 
+
 import org.apache.zookeeper.Shell;
 import org.hbase.async.Config;
 import org.hbase.async.auth.Login.TicketRenewalTask;
 import org.jboss.netty.util.HashedWheelTimer;
 import org.jboss.netty.util.TimerTask;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
+
+import org.mockito.MockedConstruction;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
+
 import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
 import org.powermock.reflect.Whitebox;
 
-@RunWith(PowerMockRunner.class)
-@PowerMockIgnore({"javax.management.*", "javax.xml.*",
-  "ch.qos.*", "org.slf4j.*",
-  "com.sum.*", "org.xml.*"})
-@PrepareForTest({ HashedWheelTimer.class, Configuration.class, Subject.class, 
-  AppConfigurationEntry.class, LoginContext.class, Login.class, 
-  KerberosTicket.class, KerberosPrincipal.class, System.class, Shell.class })
 public class TestLogin {
+  private MockedStatic<Shell> mockedShell;
+  private MockedStatic<System> mockedSystem;
+  private MockedStatic<LoginContext> mockedLoginContext;
+  private MockedStatic<Configuration> mockedConfiguration;
   private final static String CONTEXT_NAME = "Uberwald"; 
   
   private HashedWheelTimer timer;
@@ -95,57 +86,60 @@ public class TestLogin {
   private KerberosPrincipal server;
   private Date start_time;
   private Date end_time;
-  
+
   @SuppressWarnings("unchecked")
   @Before
   public void before() throws Exception {
-    // always make sure to start the unit tests off by setting the login to null
-    // since we can't gaurantee order.
-    Whitebox.setInternalState(Login.class, "current_login", (Login)null);
-    
-    start_time = new Date(1388534400000L);
-    end_time = new Date(1388538000000L);
-    
-    config = new Config();
-    timer = mock(HashedWheelTimer.class);
-    callback = mock(CallbackHandler.class);
-    app_config_entry = mock(AppConfigurationEntry.class);
-    app_config = new AppConfigurationEntry[] { app_config_entry };
-    app_config_options = new HashMap<String, Object>(2);
-    app_config_options.put("useTicketCache", "true");
-    app_config_options.put("principal", "Vetinari");
-    login_context = mock(LoginContext.class);
-    subject = mock(Subject.class);
-    ticket = PowerMockito.mock(KerberosTicket.class);
-    server = mock(KerberosPrincipal.class);
-    
-    final Configuration app_conf = mock(Configuration.class);
-    when(app_conf.getAppConfigurationEntry(anyString())).thenReturn(app_config);
-    
-    PowerMockito.mockStatic(Configuration.class);
-    PowerMockito.when(Configuration.getConfiguration()).thenReturn(app_conf);
-    
-    PowerMockito.mockStatic(LoginContext.class);
-    PowerMockito.whenNew(LoginContext.class)
-      .withAnyArguments().thenReturn(login_context);
-    when(login_context.getSubject()).thenReturn(subject);
-    
-    tickets = new HashSet<KerberosTicket>();
-    tickets.add(ticket);
-    when(subject.getPrivateCredentials(any(Class.class))).thenReturn(tickets);
-    
-    when(ticket.getServer()).thenReturn(server);
-    when(ticket.getStartTime()).thenReturn(start_time);
-    when(ticket.getEndTime()).thenReturn(end_time);
-    
-    when(server.getName()).thenReturn("krbtgt/Lancre@Lancre");
-    when(server.getRealm()).thenReturn("Lancre");
-    
-    // do NOT shell out during a unit test!
-    PowerMockito.mockStatic(Shell.class);
+    try (MockedConstruction<LoginContext> mockLoginContext = Mockito.mockConstruction(LoginContext.class)) {
+      mockedShell = Mockito.mockStatic(Shell.class);
+      mockedSystem = Mockito.mockStatic(System.class);
+      mockedLoginContext = Mockito.mockStatic(LoginContext.class);
+      mockedConfiguration = Mockito.mockStatic(Configuration.class);
+      Field current_loginField = Login.class.getClass().getDeclaredField("current_login");
+      current_loginField.setAccessible(true);
+      current_loginField.set(Login.class, (Login)null);
 
-    PowerMockito.mockStatic(System.class);
-    PowerMockito.when(System.currentTimeMillis()).thenReturn(1388534460000L);
+      start_time = new Date(1388534400000L);
+      end_time = new Date(1388538000000L);
+
+      config = new Config();
+      timer = mock(HashedWheelTimer.class);
+      callback = mock(CallbackHandler.class);
+      app_config_entry = mock(AppConfigurationEntry.class);
+      app_config = new AppConfigurationEntry[]{app_config_entry};
+      app_config_options = new HashMap<String, Object>(2);
+      app_config_options.put("useTicketCache", "true");
+      app_config_options.put("principal", "Vetinari");
+      login_context = mock(LoginContext.class);
+      subject = mock(Subject.class);
+      ticket = Mockito.mock(KerberosTicket.class);
+      server = mock(KerberosPrincipal.class);
+
+      final Configuration app_conf = mock(Configuration.class);
+      when(app_conf.getAppConfigurationEntry(anyString())).thenReturn(app_config);
+      mockedConfiguration.when(Configuration::getConfiguration).thenReturn(app_conf);
+      when(login_context.getSubject()).thenReturn(subject);
+
+      tickets = new HashSet<KerberosTicket>();
+      tickets.add(ticket);
+      when(subject.getPrivateCredentials(any(Class.class))).thenReturn(tickets);
+
+      when(ticket.getServer()).thenReturn(server);
+      when(ticket.getStartTime()).thenReturn(start_time);
+      when(ticket.getEndTime()).thenReturn(end_time);
+
+      when(server.getName()).thenReturn("krbtgt/Lancre@Lancre");
+      when(server.getRealm()).thenReturn("Lancre");
+      mockedSystem.when(System::currentTimeMillis).thenReturn(1388534460000L);
+    }
+  }
+
+  @After
+  public void tearDownStaticMocks() {
+    mockedConfiguration.closeOnDemand();
+    mockedLoginContext.closeOnDemand();
+    mockedSystem.closeOnDemand();
+    mockedShell.closeOnDemand();
   }
   
   @Test
@@ -216,12 +210,14 @@ public class TestLogin {
         (KerberosTicket)null);
     assertEquals(Login.MIN_TIME_BEFORE_RELOGIN, delay);
   }
-  
+
   @Test
   public void getRefreshDelayCantRenew() throws Exception {
     when(ticket.getRenewTill()).thenReturn(end_time);
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    Whitebox.setInternalState(login, "using_ticket_cache", true);
+    Field using_ticket_cacheField = login.getClass().getDeclaredField("using_ticket_cache");
+    using_ticket_cacheField.setAccessible(true);
+    using_ticket_cacheField.set(login, true);
     final long delay = (Long)Whitebox.invokeMethod(login, "getRefreshDelay", ticket);
     assertEquals(Login.MIN_TIME_BEFORE_RELOGIN, delay);
   }
@@ -229,7 +225,7 @@ public class TestLogin {
   @Test
   public void getRefreshPastExpiration() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    PowerMockito.when(System.currentTimeMillis()).thenReturn(1388538060000L);
+    mockedSystem.when(System::currentTimeMillis).thenReturn(1388538060000L);
     final long delay = (Long)Whitebox.invokeMethod(login, "getRefreshDelay", ticket);
     assertEquals(Login.MIN_TIME_BEFORE_RELOGIN, delay);
   }
@@ -237,7 +233,7 @@ public class TestLogin {
   @Test
   public void getRefreshWithinMinTime() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    PowerMockito.when(System.currentTimeMillis()).thenReturn(1388537942000L);
+    mockedSystem.when(System::currentTimeMillis).thenReturn(1388537942000L);
     final long delay = (Long)Whitebox.invokeMethod(login, "getRefreshDelay", ticket);
     assertEquals(0, delay);
   }
@@ -273,66 +269,82 @@ public class TestLogin {
   @Test
   public void getTGT() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    final KerberosTicket tgt = Whitebox.invokeMethod(login, "getTGT");
+    Method getTGTMethod = login.getClass().getDeclaredMethod("getTGT");
+    getTGTMethod.setAccessible(true);
+    KerberosTicket tgt = (KerberosTicket)getTGTMethod.invoke(login);
     assertEquals(tgt, ticket);
   }
-  
+
   @Test
   public void getTGTNoMatch() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
     when(server.getName()).thenReturn("quirm");
-    final KerberosTicket tgt = Whitebox.invokeMethod(login, "getTGT");
+    Method getTGTMethod = login.getClass().getDeclaredMethod("getTGT");
+    getTGTMethod.setAccessible(true);
+    KerberosTicket tgt = (KerberosTicket)getTGTMethod.invoke(login);
     assertNull(tgt);
   }
-  
+
   @Test
   public void getTGTNoTickets() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
     when(subject.getPrivateCredentials(KerberosTicket.class))
-      .thenReturn(Collections.<KerberosTicket>emptySet());
-    final KerberosTicket tgt = Whitebox.invokeMethod(login, "getTGT");
+        .thenReturn(Collections.<KerberosTicket>emptySet());
+    Method getTGTMethod = login.getClass().getDeclaredMethod("getTGT");
+    getTGTMethod.setAccessible(true);
+    KerberosTicket tgt = (KerberosTicket)getTGTMethod.invoke(login);
     assertNull(tgt);
   }
 
   @Test
   public void refreshTicketCache() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    Whitebox.invokeMethod(login, "refreshTicketCache");
+    Method refreshTicketCacheMethod = login.getClass().getDeclaredMethod("refreshTicketCache");
+    refreshTicketCacheMethod.setAccessible(true);
+    refreshTicketCacheMethod.invoke(login);
     PowerMockito.verifyStatic(times(1));
     Shell.execCommand("/usr/bin/kinit", "-R");
   }
-  
+
   @Test
   public void refreshTicketCacheConfigPath() throws Exception {
-    config.overrideConfig("asynchbase.security.auth.kinit", 
+    config.overrideConfig("asynchbase.security.auth.kinit",
         "/usr/local/bin/kinit");
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    Whitebox.invokeMethod(login, "refreshTicketCache");
+    Method refreshTicketCacheMethod = login.getClass().getDeclaredMethod("refreshTicketCache");
+    refreshTicketCacheMethod.setAccessible(true);
+    refreshTicketCacheMethod.invoke(login);
     PowerMockito.verifyStatic(times(1));
     Shell.execCommand("/usr/local/bin/kinit", "-R");
   }
-  
-  @Test (expected = RuntimeException.class)
+
+  @Test(expected = RuntimeException.class)
   public void refreshTicketCacheIOException() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    PowerMockito.when(Shell.execCommand(anyString(), anyString()))
-      .thenThrow(new IOException("Boo!"));
-    Whitebox.invokeMethod(login, "refreshTicketCache");
+    mockedShell.when(() -> Shell.execCommand(anyString(), anyString()))
+        .thenThrow(new IOException("Boo!"));
+    Method refreshTicketCacheMethod = login.getClass().getDeclaredMethod("refreshTicketCache");
+    refreshTicketCacheMethod.setAccessible(true);
+    refreshTicketCacheMethod.invoke(login);
   }
-  
-  @Test (expected = RuntimeException.class)
+
+  @Test(expected = RuntimeException.class)
   public void refreshTicketCacheException() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    PowerMockito.when(Shell.execCommand(anyString(), anyString()))
-      .thenThrow(new Exception("Boo!"));
-    Whitebox.invokeMethod(login, "refreshTicketCache");
+    mockedShell.when(() -> Shell.execCommand(anyString(), anyString()))
+        .thenThrow(new Exception("Boo!"));
+    Method refreshTicketCacheMethod = login.getClass().getDeclaredMethod("refreshTicketCache");
+    refreshTicketCacheMethod.setAccessible(true);
+    refreshTicketCacheMethod.invoke(login);
   }
-  
+
   @Test
   public void refreshTicketCacheEmptyCommand() throws Exception {
     config.overrideConfig("asynchbase.security.auth.kinit", "");
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    Whitebox.invokeMethod(login, "refreshTicketCache");
+    Method refreshTicketCacheMethod = login.getClass().getDeclaredMethod("refreshTicketCache");
+    refreshTicketCacheMethod.setAccessible(true);
+    refreshTicketCacheMethod.invoke(login);
     PowerMockito.verifyStatic(times(1));
     Shell.execCommand("/usr/bin/kinit", "-R");
   }
@@ -340,33 +352,43 @@ public class TestLogin {
   @Test
   public void reLogin() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    Whitebox.invokeMethod(login, "reLogin");
+    Method reLoginMethod = login.getClass().getDeclaredMethod("reLogin");
+    reLoginMethod.setAccessible(true);
+    reLoginMethod.invoke(login);
     verify(login_context, times(1)).logout();
     verify(login_context, times(2)).login();
   }
-  
+
   @Test
   public void reLoginNotKerberos() throws Exception {
     when(subject.getPrivateCredentials(KerberosTicket.class))
-      .thenReturn(Collections.<KerberosTicket>emptySet());
+        .thenReturn(Collections.<KerberosTicket>emptySet());
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    Whitebox.invokeMethod(login, "reLogin");
+    Method reLoginMethod = login.getClass().getDeclaredMethod("reLogin");
+    reLoginMethod.setAccessible(true);
+    reLoginMethod.invoke(login);
     verify(login_context, never()).logout();
     verify(login_context, times(1)).login();
   }
-  
-  @Test (expected = LoginException.class)
+
+  @Test(expected = LoginException.class)
   public void reLoginNotLoggedInYet() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    Whitebox.setInternalState(login, "login_context", (LoginContext)null);
-    Whitebox.invokeMethod(login, "reLogin");
+    Field login_contextField = login.getClass().getDeclaredField("login_context");
+    login_contextField.setAccessible(true);
+    login_contextField.set(login, (LoginContext)null);
+    Method reLoginMethod = login.getClass().getDeclaredMethod("reLogin");
+    reLoginMethod.setAccessible(true);
+    reLoginMethod.invoke(login);
   }
-  
-  @Test (expected = LoginException.class)
+
+  @Test(expected = LoginException.class)
   public void reLoginLoginFailed() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
     doThrow(new LoginException("Boo!")).when(login_context).login();
-    Whitebox.invokeMethod(login, "reLogin");
+    Method reLoginMethod = login.getClass().getDeclaredMethod("reLogin");
+    reLoginMethod.setAccessible(true);
+    reLoginMethod.invoke(login);
   }
 
   @Test
@@ -381,31 +403,35 @@ public class TestLogin {
     PowerMockito.verifyStatic(never());
     Shell.execCommand("/usr/bin/kinit", "-R");
   }
-  
+
   @Test
   public void ticketRenewalTaskRefreshCache() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    Whitebox.setInternalState(login, "using_ticket_cache", true);
+    Field using_ticket_cacheField = login.getClass().getDeclaredField("using_ticket_cache");
+    using_ticket_cacheField.setAccessible(true);
+    using_ticket_cacheField.set(login, true);
     final TicketRenewalTask task = login.new TicketRenewalTask();
     task.run(null);
-    verify(timer, times(2)).newTimeout((TimerTask)any(), anyLong(), 
+    verify(timer, times(2)).newTimeout((TimerTask)any(), anyLong(),
         eq(TimeUnit.MILLISECONDS));
     verify(login_context, times(1)).logout();
     verify(login_context, times(2)).login();
     PowerMockito.verifyStatic(times(1));
     Shell.execCommand("/usr/bin/kinit", "-R");
   }
-  
+
   @Test
   public void ticketRenewalTaskLoginException() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    Whitebox.setInternalState(login, "login_context", (LoginContext)null);
+    Field login_contextField = login.getClass().getDeclaredField("login_context");
+    login_contextField.setAccessible(true);
+    login_contextField.set(login, (LoginContext)null);
     final TicketRenewalTask task = login.new TicketRenewalTask();
     task.run(null);
-    verify(timer, times(2)).newTimeout((TimerTask)any(), anyLong(), 
+    verify(timer, times(2)).newTimeout((TimerTask)any(), anyLong(),
         eq(TimeUnit.MILLISECONDS));
     // catch the default refresh rate
-    verify(timer, times(1)).newTimeout((TimerTask)any(), 
+    verify(timer, times(1)).newTimeout((TimerTask)any(),
         eq(Login.MIN_TIME_BEFORE_RELOGIN), eq(TimeUnit.MILLISECONDS));
     verify(login_context, never()).logout();
     verify(login_context, times(1)).login();

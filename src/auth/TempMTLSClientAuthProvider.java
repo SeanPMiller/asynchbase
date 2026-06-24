@@ -55,7 +55,7 @@ import javax.security.sasl.RealmCallback;
 import javax.security.sasl.RealmChoiceCallback;
 import javax.security.sasl.Sasl;
 import javax.security.sasl.SaslClient;
-import javax.xml.bind.DatatypeConverter;
+import java.util.Base64;
 
 import org.hbase.async.HBaseClient;
 import org.hbase.async.auth.RefreshingSSLContext.RefreshCallback;
@@ -230,12 +230,12 @@ public class TempMTLSClientAuthProvider extends ClientAuthProvider
           if (nc != null) {
             if (LOG.isDebugEnabled())
               LOG.debug("SASL client callback: setting username: " + new String(identifier));
-            nc.setName(DatatypeConverter.printBase64Binary(identifier));
+            nc.setName(Base64.getEncoder().encodeToString(identifier));
           }
           if (pc != null) {
             if (LOG.isDebugEnabled())
               LOG.debug("SASL client callback: setting userPassword");
-            pc.setPassword(DatatypeConverter.printBase64Binary(pass).toCharArray());
+            pc.setPassword(Base64.getEncoder().encodeToString(pass).toCharArray());
           }
           if (rc != null) {
             if (LOG.isDebugEnabled())

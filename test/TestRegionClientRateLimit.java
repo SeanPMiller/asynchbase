@@ -26,45 +26,30 @@
  */
 package org.hbase.async;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.fail;
+import static org.junit.Assert.*;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
-import org.hbase.async.BaseTestHBaseClient.FakeTaskTimer;
-import org.hbase.async.generated.RPCPB;
-import org.jboss.netty.channel.Channels;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
-import org.powermock.reflect.Whitebox;
 
 import com.google.common.util.concurrent.RateLimiter;
-import com.stumbleupon.async.Deferred;
+import org.hbase.async.BaseTestHBaseClient.FakeTaskTimer;
+import org.hbase.async.generated.RPCPB;
+import org.hbase.async.ratelimiter.LimitPolicy;
+import org.hbase.async.ratelimiter.RateLimitPolicyImpl;
 import org.hbase.async.ratelimiter.TestWriteRateLimiter.MockRateLimiter;
 import org.hbase.async.ratelimiter.WriteRateLimiter;
 import org.hbase.async.ratelimiter.WriteRateLimiter.SIGNAL;
-import org.hbase.async.ratelimiter.LimitPolicy;
-import org.hbase.async.ratelimiter.RateLimitPolicyImpl;
+import org.jboss.netty.channel.Channels;
+import org.junit.Before;
+import org.junit.Test;
 
-@RunWith(PowerMockRunner.class)
-//"Classloader hell"...  It's real.  Tell PowerMock to ignore these classes
-//because they fiddle with the class loader.  We don't test them anyway.
-@PowerMockIgnore({"javax.management.*", "javax.xml.*",
-           "ch.qos.*", "org.slf4j.*",
-           "com.sum.*", "org.xml.*"})
-@PrepareForTest({ HBaseClient.class, RegionClient.class, Channels.class,
-  RPCPB.ResponseHeader.class, NotServingRegionException.class, 
-  RegionInfo.class, RPCPB.ExceptionResponse.class, HBaseRpc.class,
-  AppendRequest.class, PutRequest.class, MultiAction.class,
-  RateLimiter.class })
+import org.powermock.reflect.Whitebox;
+
+import com.stumbleupon.async.Deferred;
+
 public class TestRegionClientRateLimit extends BaseTestRegionClient {
   private static final byte[] QUALIFIER = { 's', 't', 'o' };
   
@@ -74,16 +59,18 @@ public class TestRegionClientRateLimit extends BaseTestRegionClient {
   private WriteRateLimiter rate_limiter;
   private LimitPolicy policy;
   private FakeTaskTimer timer;
-  
+
   @Before
   public void beforeLocal() throws Exception {
     rnd = new Random(System.currentTimeMillis());
     timer = new FakeTaskTimer();
     policy = new RateLimitPolicyImpl(80, 10);
-    rate_limiter = new WriteRateLimiter(20, 10, 5, region_client, true, 
+    rate_limiter = new WriteRateLimiter(20, 10, 5, region_client, true,
         policy, timer, 60000);
     guava_limiter = new MockRateLimiter();
-    Whitebox.setInternalState(region_client, "rate_limiter", rate_limiter);
+    Field rate_limiterField = region_client.getClass().getDeclaredField("rate_limiter");
+    rate_limiterField.setAccessible(true);
+    rate_limiterField.set(region_client, rate_limiter);
   }
   
   @Test
@@ -463,22 +450,24 @@ public class TestRegionClientRateLimit extends BaseTestRegionClient {
     assertEquals(320, region_client.stats().rpcsSent());
     assertEquals(0, region_client.stats().writesBlockedByRateLimiter());
   }
-  
+
   @Test
   public void failuresWithLimiterDisabled() throws Exception {
-    rate_limiter = new WriteRateLimiter(20, 10, 5, region_client, false, 
+    rate_limiter = new WriteRateLimiter(20, 10, 5, region_client, false,
         policy, timer, 60000);
-    Whitebox.setInternalState(region_client, "rate_limiter", rate_limiter);
-    
+    Field rate_limiterField = region_client.getClass().getDeclaredField("rate_limiter");
+    rate_limiterField.setAccessible(true);
+    rate_limiterField.set(region_client, rate_limiter);
+
     // 10 failures but we never engage the limiter
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0;i < 10;i++) {
       rpc = makeRPC();
       region_client.sendRpc(rpc);
       rate_limiter.ping(SIGNAL.FAILURE);
       assertNotNull(timer.pausedTask);
       timer.continuePausedTask();
     }
-    
+
     assertEquals(0, guava_limiter.current_rate, 0.001);
     assertEquals(10, region_client.stats().rpcsSent());
     assertNull(Whitebox.getInternalState(rate_limiter, "rate_limiter"));
@@ -1005,18 +994,20 @@ public class TestRegionClientRateLimit extends BaseTestRegionClient {
     assertEquals(10, region_client.stats().rpcsSent());
     assertNotNull(Whitebox.getInternalState(rate_limiter, "rate_limiter"));
   }
-  
+
   @Test
-  public void offsetDelayedAllSuccessNoOtherAttemptsZeroMinAttempts() 
+  public void offsetDelayedAllSuccessNoOtherAttemptsZeroMinAttempts()
       throws Exception {
     timer = new FakeTaskTimer();
     policy = new RateLimitPolicyImpl(80, 0);
-    rate_limiter = new WriteRateLimiter(20, 10, 5, region_client, true, 
+    rate_limiter = new WriteRateLimiter(20, 10, 5, region_client, true,
         policy, timer, 60000);
     guava_limiter = new MockRateLimiter();
-    Whitebox.setInternalState(region_client, "rate_limiter", rate_limiter);
-    
-    for (int i = 0; i < 10; i++) {
+    Field rate_limiterField = region_client.getClass().getDeclaredField("rate_limiter");
+    rate_limiterField.setAccessible(true);
+    rate_limiterField.set(region_client, rate_limiter);
+
+    for (int i = 0;i < 10;i++) {
       rpc = makeRPC();
       region_client.sendRpc(rpc);
     }
@@ -1027,14 +1018,14 @@ public class TestRegionClientRateLimit extends BaseTestRegionClient {
     assertEquals(0, guava_limiter.acquire_attempts);
     assertEquals(10, region_client.stats().rpcsSent());
     assertNotNull(Whitebox.getInternalState(rate_limiter, "rate_limiter"));
-    
-    for (int i = 0; i < 10; i++) {
+
+    for (int i = 0;i < 10;i++) {
       rate_limiter.ping(SIGNAL.SUCCESS);
     }
-    
+
     assertNotNull(timer.pausedTask);
     timer.continuePausedTask();
-    
+
     assertEquals(20, guava_limiter.current_rate, 0.001);
     assertEquals(0, guava_limiter.acquire_attempts);
     assertEquals(10, region_client.stats().rpcsSent());

@@ -26,28 +26,19 @@
  */
 package org.hbase.async;
 
-import java.util.ArrayList;
-
-import org.junit.Test;
-import org.junit.runner.RunWith;
-
 import static org.junit.Assert.assertSame;
-
-import org.mockito.invocation.InvocationOnMock;
-import org.mockito.stubbing.Answer;
 
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
-import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import java.util.ArrayList;
 
-@RunWith(PowerMockRunner.class)
-@PowerMockIgnore({"javax.management.*", "javax.xml.*",
-  "ch.qos.*", "org.slf4j.*",
-  "com.sum.*", "org.xml.*"})
-@PrepareForTest({ HBaseClient.class, RegionClient.class })
+
+import org.junit.Test;
+
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
+
 final class TestGetRequest extends BaseTestHBaseClient {
 
   /**

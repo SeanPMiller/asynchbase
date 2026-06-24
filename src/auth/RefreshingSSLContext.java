@@ -56,7 +56,7 @@ import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
-import javax.xml.bind.DatatypeConverter;
+import java.util.Base64;
 
 import org.jboss.netty.util.Timeout;
 import org.jboss.netty.util.Timer;
@@ -438,7 +438,7 @@ public class RefreshingSSLContext implements TimerTask {
   private static RSAPrivateKey parsePKCS8Key(final String key)
       throws NoSuchAlgorithmException, InvalidKeySpecException {
     final PKCS8EncodedKeySpec spec = new PKCS8EncodedKeySpec(
-        DatatypeConverter.parseBase64Binary(key));
+        Base64.getMimeDecoder().decode(key));
     final KeyFactory factory = KeyFactory.getInstance("RSA");
     return (RSAPrivateKey) factory.generatePrivate(spec);
   }
@@ -459,7 +459,7 @@ public class RefreshingSSLContext implements TimerTask {
   private static RSAPrivateKey parsePKCS1Key(final String key)
       throws IOException, GeneralSecurityException {
     final DerInputStream stream = new DerInputStream(
-        DatatypeConverter.parseBase64Binary(key));
+        Base64.getMimeDecoder().decode(key));
     final DerValue[] seq = stream.getSequence(0);
 
     if (seq.length < 9) {
@@ -531,7 +531,7 @@ public class RefreshingSSLContext implements TimerTask {
       return null;
     }
     return (X509Certificate) CA_FACTORY.generateCertificate(
-        new ByteArrayInputStream(DatatypeConverter.parseBase64Binary((cert))));
+        new ByteArrayInputStream(Base64.getMimeDecoder().decode((cert))));
   }
 
   /**

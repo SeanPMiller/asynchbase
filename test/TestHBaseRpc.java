@@ -26,24 +26,14 @@
  */
 package org.hbase.async;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyBoolean;
-import static org.mockito.Matchers.anyLong;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.verify;
+import static org.junit.Assert.*;
 
+import static org.mockito.Mockito.*;
+
+import java.lang.reflect.Field;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+
 
 import org.jboss.netty.channel.socket.nio.NioClientBossPool;
 import org.jboss.netty.channel.socket.nio.NioClientSocketChannelFactory;
@@ -53,44 +43,37 @@ import org.jboss.netty.util.Timeout;
 import org.jboss.netty.util.TimerTask;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
-import org.powermock.reflect.Whitebox;
 
 import com.stumbleupon.async.Deferred;
 import com.stumbleupon.async.TimeoutException;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest({ HBaseClient.class, RegionClient.class, HBaseRpc.class, 
-  GetRequest.class, RegionInfo.class, NioClientSocketChannelFactory.class, 
-  Executors.class, HashedWheelTimer.class, NioClientBossPool.class, 
-  NioWorkerPool.class })
 public class TestHBaseRpc extends BaseTestHBaseClient {
   private int default_timeout;
-  
+
   @Before
   public void beforeLocal() throws Exception {
     timer.stop();
     when(regionclient.getHBaseClient()).thenReturn(client);
-    Whitebox.setInternalState(client, "rpc_timeout", 60000);
+    Field rpc_timeoutField = client.getClass().getDeclaredField("rpc_timeout");
+    rpc_timeoutField.setAccessible(true);
+    rpc_timeoutField.set(client, 60000);
     default_timeout = 60000;
   }
-  
+
   @Test
   public void setIdAndClient() throws Exception {
     GetRequest rpc = new GetRequest(TABLE, KEY, FAMILY);
     assertEquals(0, rpc.rpcId());
     assertNull(rpc.timeoutHandle());
     assertNull(rpc.regionClient());
-    
+
     // set on a fresh RPC.
     rpc.setIdAndClient(42, regionclient);
     assertEquals(42, rpc.rpcId());
     assertNull(rpc.timeoutHandle());
     assertSame(regionclient, rpc.regionClient());
     verify(regionclient, never()).removeRpc(rpc, false);
-    
+
     // retried on another client
     final RegionClient alt_client = mock(RegionClient.class);
     rpc.setIdAndClient(24, alt_client);
@@ -99,7 +82,7 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
     assertSame(alt_client, rpc.regionClient());
     verify(regionclient, times(1)).removeRpc(rpc, false);
     verify(alt_client, never()).removeRpc(rpc, false);
-    
+
     // nulled out on a reset
     rpc.setIdAndClient(0, null);
     assertEquals(0, rpc.rpcId());
@@ -107,18 +90,20 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
     assertNull(rpc.regionClient());
     verify(regionclient, times(1)).removeRpc(rpc, false);
     verify(alt_client, times(1)).removeRpc(rpc, false);
-    
+
     // a timeout was set, want to cancel it
     rpc = new GetRequest(TABLE, KEY, FAMILY);
     rpc.setIdAndClient(42, regionclient);
     final Timeout timeout_handle = mock(Timeout.class);
-    Whitebox.setInternalState(rpc, "timeout_handle", timeout_handle);
+    Field timeout_handleField = rpc.getClass().getDeclaredField("timeout_handle");
+    timeout_handleField.setAccessible(true);
+    timeout_handleField.set(rpc, timeout_handle);
     assertEquals(42, rpc.rpcId());
     assertSame(timeout_handle, rpc.timeoutHandle());
     assertSame(regionclient, rpc.regionClient());
     verify(regionclient, never()).removeRpc(rpc, false);
     verify(timeout_handle, never()).cancel();
-    
+
     rpc.setIdAndClient(24, alt_client);
     assertEquals(24, rpc.rpcId());
     assertNull(rpc.timeoutHandle());
@@ -224,12 +209,14 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
       fail("Expected a TimeoutException");
     } catch (TimeoutException e) { }
   }
-  
-  @Test (expected = IllegalStateException.class)
+
+  @Test(expected = IllegalStateException.class)
   public void enqueueTimeoutAlreadyTimedout() throws Exception {
     final GetRequest rpc = new GetRequest(TABLE, KEY, FAMILY);
     rpc.setIdAndClient(1, regionclient);
-    Whitebox.setInternalState(rpc, "has_timedout", true);
+    Field has_timedoutField = rpc.getClass().getDeclaredField("has_timedout");
+    has_timedoutField.setAccessible(true);
+    has_timedoutField.set(rpc, true);
     rpc.enqueueTimeout(regionclient);
   }
   
@@ -262,21 +249,23 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
       fail("Expected a TimeoutException");
     } catch (TimeoutException e) { }
   }
-  
+
   @Test
   public void enqueueTimeoutTimerShuttingDown() throws Exception {
     timer = mock(FakeTimer.class);
     when(timer.newTimeout(any(TimerTask.class), anyLong(), any(TimeUnit.class)))
-      .thenThrow(new IllegalStateException("Shutdown!"));
-    Whitebox.setInternalState(client, "rpc_timeout_timer", timer);
+        .thenThrow(new IllegalStateException("Shutdown!"));
+    Field rpc_timeout_timerField = client.getClass().getDeclaredField("rpc_timeout_timer");
+    rpc_timeout_timerField.setAccessible(true);
+    rpc_timeout_timerField.set(client, timer);
     final GetRequest rpc = new GetRequest(TABLE, KEY, FAMILY);
     final Deferred<Object> deferred = rpc.getDeferred();
     rpc.setIdAndClient(1, regionclient);
     assertNull(rpc.timeoutHandle());
     assertFalse(rpc.hasTimedOut());
-    
+
     rpc.enqueueTimeout(regionclient);
-    
+
     assertNull(rpc.timeoutHandle());
     assertEquals(default_timeout, rpc.getTimeout());
     assertFalse(rpc.hasTimedOut());
@@ -285,7 +274,8 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
     try {
       deferred.join(1);
       fail("Expected a TimeoutException");
-    } catch (TimeoutException e) { }
+    } catch (TimeoutException e) {
+    }
   }
 
   @Test
@@ -336,7 +326,7 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
     assertEquals(0, rpc.attempt);
     assertFalse(rpc.hasDeferred());
   }
-  
+
   @Test
   public void callbackWithTimeout() throws Exception {
     final GetRequest rpc = new GetRequest(TABLE, KEY, FAMILY);
@@ -344,9 +334,11 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
     final Timeout timeout_handle = mock(Timeout.class);
     final Deferred<Object> deferred = rpc.getDeferred();
     final Object response = new Object();
-    Whitebox.setInternalState(rpc, "timeout_handle", timeout_handle);
+    Field timeout_handleField = rpc.getClass().getDeclaredField("timeout_handle");
+    timeout_handleField.setAccessible(true);
+    timeout_handleField.set(rpc, timeout_handle);
     assertTrue(rpc.hasDeferred());
-    
+
     rpc.callback(response);
     assertSame(response, deferred.join());
     assertEquals(0, rpc.attempt);
@@ -367,16 +359,18 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
     assertEquals(4, rpc.attempt);
     assertFalse(rpc.hasDeferred());
   }
-  
+
   @Test
   public void callbackWithTimeoutWithoutDeferred() throws Exception {
     final GetRequest rpc = new GetRequest(TABLE, KEY, FAMILY);
     rpc.attempt = 4;
     final Timeout timeout_handle = mock(Timeout.class);
     final Object response = new Object();
-    Whitebox.setInternalState(rpc, "timeout_handle", timeout_handle);
+    Field timeout_handleField = rpc.getClass().getDeclaredField("timeout_handle");
+    timeout_handleField.setAccessible(true);
+    timeout_handleField.set(rpc, timeout_handle);
     assertFalse(rpc.hasDeferred());
-    
+
     rpc.callback(response);
     assertEquals(4, rpc.attempt);
     assertFalse(rpc.hasDeferred());
@@ -423,22 +417,25 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
       fail("Expected a RpcTimedOutException");
     } catch (RpcTimedOutException ex) { }
   }
-  
+
   @Test
   public void timeoutNulledRegionClient() throws Exception {
     final GetRequest rpc = new GetRequest(TABLE, KEY, FAMILY);
     final Deferred<Object> deferred = rpc.getDeferred();
     rpc.setIdAndClient(1, regionclient);
     rpc.enqueueTimeout(regionclient);
-    Whitebox.setInternalState(rpc, "region_client", (RegionClient)null);
+    Field region_clientField = rpc.getClass().getDeclaredField("region_client");
+    region_clientField.setAccessible(true);
+    region_clientField.set(rpc, (RegionClient)null);
     timer.tasks.get(0).getKey().run(rpc.timeoutHandle());
-    
+
     assertNull(rpc.timeoutHandle());
     verify(regionclient, never()).removeRpc(rpc, true);
     try {
       deferred.join(1);
       fail("Expected a RpcTimedOutException");
-    } catch (RpcTimedOutException ex) { }
+    } catch (RpcTimedOutException ex) {
+    }
   }
 
   @Test

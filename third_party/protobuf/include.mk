@@ -23,7 +23,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-PROTOBUF_VERSION := 2.5.0
+PROTOBUF_VERSION := 3.25.9
 PROTOBUF := third_party/protobuf/protobuf-java-$(PROTOBUF_VERSION).jar
 PROTOBUF_BASE_URL := http://repo1.maven.org/maven2/com/google/protobuf/protobuf-java/$(PROTOBUF_VERSION)
 

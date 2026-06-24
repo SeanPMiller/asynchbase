@@ -26,32 +26,21 @@
  */
 package org.hbase.async;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyInt;
-import static org.mockito.Matchers.anyLong;
-import static org.mockito.Matchers.anyString;
-import static org.mockito.Matchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.Assert.*;
+
+import static org.mockito.Mockito.*;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-
 import javax.security.sasl.SaslClient;
 
+
+import com.google.protobuf.CodedOutputStream;
 import org.hbase.async.MultiAction.Response;
 import org.hbase.async.auth.SimpleClientAuthProvider;
 import org.hbase.async.generated.CellPB.Cell;
@@ -68,19 +57,20 @@ import org.jboss.netty.channel.Channels;
 import org.jboss.netty.channel.MessageEvent;
 import org.jboss.netty.handler.codec.replay.VoidEnum;
 import org.jboss.netty.util.TimerTask;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PrepareForTest;
+
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
+
 import org.powermock.reflect.Whitebox;
 
-import com.google.protobuf.CodedOutputStream;
 import com.stumbleupon.async.Deferred;
 import com.stumbleupon.async.TimeoutException;
 
-@PrepareForTest({ Channels.class, GetRequest.class, 
-  ChannelHandlerContext.class })
 public class TestRegionClientDecode extends BaseTestRegionClient {
+  private MockedStatic<Channels> mockedChannels;
   private static final VoidEnum VOID = (VoidEnum)null;
   private static final byte[] ROW = { 0, 0, 1 };
   private static final byte[] FAMILY = { 'n', 'o', 'b' };
@@ -97,8 +87,14 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
   
   @Before
   public void beforeLocal() throws Exception {
+    mockedChannels = Mockito.mockStatic(Channels.class);
     //when(hbase_client.getDefaultRpcTimeout()).thenReturn(60000);
     timer.stop();
+  }
+
+  @After
+  public void tearDownStaticMocks() {
+    mockedChannels.closeOnDemand();
   }
   
   @Test
@@ -238,27 +234,28 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     assertEquals(60000, (long)timer.tasks.get(0).getValue());
     verify(timer.timeouts.get(0), never()).cancel();
   }
-  
+
   @Test
   public void goodMultiActionResponse94() throws Exception {
-    Whitebox.setInternalState(region_client, "server_version", 
-        RegionClient.SERVER_VERSION_092_OR_ABOVE);
+    Field server_versionField = region_client.getClass().getDeclaredField("server_version");
+    server_versionField.setAccessible(true);
+    server_versionField.set(region_client, RegionClient.SERVER_VERSION_092_OR_ABOVE);
     final MultiAction rpc = new MultiAction();
-    for (int i = 0; i < 100; i++) {
-      final PutRequest put = new PutRequest("test".getBytes(), "hello".getBytes(), "t".getBytes(), 
-          Bytes.fromInt(100), new byte[] { 42 });
+    for (int i = 0;i < 100;i++) {
+      final PutRequest put = new PutRequest("test".getBytes(), "hello".getBytes(), "t".getBytes(),
+          Bytes.fromInt(100), new byte[]{42});
       put.setRegion(region);
       rpc.add(put);
     }
-    
+
     final Deferred<Object> md = rpc.getDeferred();
     inflightTheRpc(201, rpc);
-    region_client.decode(ctx, chan, 
+    region_client.decode(ctx, chan,
         ChannelBuffers.wrappedBuffer(MULTI_ACTION_RESPONSE_094), VOID);
-    
-    final Response response = (Response) md.join();
+
+    final Response response = (Response)md.join();
     assertEquals(100, response.size());
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0;i < 100;i++) {
       assertEquals(MultiAction.SUCCESS, response.result(i));
     }
   }
@@ -525,8 +522,8 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
       .thenReturn(ChannelBuffers.wrappedBuffer(Arrays.copyOf(array, 3)))
       .thenReturn(ChannelBuffers.wrappedBuffer(
           Arrays.copyOfRange(array, 10, array.length)));
-    
-    
+
+
     region_client.messageReceived(ctx, event);
     try {
       region_client.messageReceived(ctx, event);
@@ -546,57 +543,61 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
   @Test
   public void replayedSecure() throws Exception {
     resetMockClient();
-    config.overrideConfig(SecureRpcHelper.SECURITY_AUTHENTICATION_KEY, 
+    config.overrideConfig(SecureRpcHelper.SECURITY_AUTHENTICATION_KEY,
         "simple");
-    config.overrideConfig(SimpleClientAuthProvider.USERNAME_KEY, 
+    config.overrideConfig(SimpleClientAuthProvider.USERNAME_KEY,
         "Cohen");
-    
-    final SecureRpcHelper96 secure_helper = 
-        PowerMockito.spy(new SecureRpcHelper96(hbase_client, 
+
+    final SecureRpcHelper96 secure_helper =
+        Mockito.spy(new SecureRpcHelper96(hbase_client,
             region_client, new InetSocketAddress("127.0.0.1", 50512)));
     final SaslClient sasl_client = mock(SaslClient.class);
-    Whitebox.setInternalState(secure_helper, "sasl_client", sasl_client);
+    Field sasl_clientField = secure_helper.getClass().getDeclaredField("sasl_client");
+    sasl_clientField.setAccessible(true);
+    sasl_clientField.set(secure_helper, sasl_client);
     when(sasl_client.isComplete()).thenReturn(false);
 
-    Whitebox.setInternalState(region_client, "secure_rpc_helper", secure_helper);
+    Field secure_rpc_helperField = region_client.getClass().getDeclaredField("secure_rpc_helper");
+    secure_rpc_helperField.setAccessible(true);
+    secure_rpc_helperField.set(region_client, secure_helper);
 
-    PowerMockito.when(secure_helper.processChallenge(any(byte[].class)))
-      .thenReturn(new byte[] { 24 });
-    
+    Mockito.when(secure_helper.processChallenge(any(byte[].class)))
+        .thenReturn(new byte[]{24});
+
     final int id = 42;
-    final byte[] array = { 0, 0, 0, 0, 0, 0, 0, 4, 42, 24, 42, 24 };
-    
+    final byte[] array = {0, 0, 0, 0, 0, 0, 0, 4, 42, 24, 42, 24};
+
     final GetRequest get = new GetRequest(TABLE, ROW);
     final Deferred<Object> deferred = get.getDeferred();
     inflightTheRpc(id, get);
-    
+
     final byte[][] chunks = new byte[2][];
     chunks[0] = Arrays.copyOf(array, 3);
     chunks[1] = Arrays.copyOfRange(array, 10, array.length);
-    
+
     final MessageEvent event = mock(MessageEvent.class);
     when(event.getMessage())
-      .thenReturn(ChannelBuffers.wrappedBuffer(Arrays.copyOf(array, 3)))
-      .thenReturn(ChannelBuffers.wrappedBuffer(
-          Arrays.copyOfRange(array, 3, 6)))
-          .thenReturn(ChannelBuffers.wrappedBuffer(
-          Arrays.copyOfRange(array, 6, 11)))
-      .thenReturn(ChannelBuffers.wrappedBuffer(
-          Arrays.copyOfRange(array, 11, array.length)));
-    
+        .thenReturn(ChannelBuffers.wrappedBuffer(Arrays.copyOf(array, 3)))
+        .thenReturn(ChannelBuffers.wrappedBuffer(
+            Arrays.copyOfRange(array, 3, 6)))
+        .thenReturn(ChannelBuffers.wrappedBuffer(
+            Arrays.copyOfRange(array, 6, 11)))
+        .thenReturn(ChannelBuffers.wrappedBuffer(
+            Arrays.copyOfRange(array, 11, array.length)));
+
     region_client.messageReceived(ctx, event);
     region_client.messageReceived(ctx, event);
     region_client.messageReceived(ctx, event);
     when(sasl_client.isComplete())
-      .thenReturn(false)
-      .thenReturn(true);
-    PowerMockito.mockStatic(Channels.class);
+        .thenReturn(false)
+        .thenReturn(true);
     region_client.messageReceived(ctx, event);
-    
+
     try {
       deferred.join(100);
-    } catch (TimeoutException ex) { }
-    
+    } catch (TimeoutException ex) {
+    }
+
     assertEquals(1, timer.tasks.size());
     assertEquals(60000, (long)timer.tasks.get(0).getValue());
     verify(timer.timeouts.get(0), never()).cancel();
@@ -890,13 +891,7 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
   
   @Test
   public void rpcTooBig() throws Exception {
-    // we only accept RPCs up to 256MBs in size right now. In order to avoid
-    // allocating 256MB for unit testing, we'll tell the region client to
-    // skip the ensureReadable call. Just over the line is 268435456 bytes
-    // See HBaseRpc.MAX_BYTE_ARRAY_MASK
-    
-    PowerMockito.mockStatic(RegionClient.class);
-    PowerMockito.doNothing().when(RegionClient.class, "ensureReadable", 
+    Mockito.doNothing().when(RegionClient.class, "ensureReadable", 
         any(ChannelBuffer.class), anyInt());
     ChannelBuffer buffer = new ReadOnlyChannelBuffer(
         ChannelBuffers.wrappedBuffer(new byte[] { 16, 0, 0, 0, 1 }));
@@ -1042,29 +1037,31 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     // This should never happen, in theory
     region_client.decode(ctx, chan, null, VOID);
   }
-  
+
   @Test
   public void timedoutRpcThenGoodRpc090() throws Exception {
     resetMockClient();
-    Whitebox.setInternalState(region_client, "server_version", 
-        RegionClient.SERVER_VERSION_090_AND_BEFORE);    
-    
+    Field server_versionField = region_client.getClass().getDeclaredField("server_version");
+    server_versionField.setAccessible(true);
+    server_versionField.set(region_client, RegionClient.SERVER_VERSION_090_AND_BEFORE);
+
     // this one has been timed out and we assume it was popped from the map
     final GetRequest timedout = new GetRequest(TABLE, ROW);
     timedout.setTimeout(1);
     final Deferred<Object> deferred_to = timedout.getDeferred();
     inflightTheRpc(1, timedout);
-    
+
     assertEquals(1, rpcs_inflight.size());
     assertEquals(1, timer.tasks.size());
     assertEquals(1, (long)timer.tasks.get(0).getValue());
     timer.tasks.get(0).getKey().run(null);
     assertEquals(0, rpcs_inflight.size());
-    
+
     try {
       deferred_to.join(100);
-    } catch (RpcTimedOutException ex) { }
-    
+    } catch (RpcTimedOutException ex) {
+    }
+
     final GetRequest rpc = new GetRequest(TABLE, KEY);
     final Deferred<Object> deferred = rpc.getDeferred();
     inflightTheRpc(3, rpc);
@@ -1073,10 +1070,10 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
         ChannelBuffers.wrappedBuffer(MULTI_ACTION_RESPONSE_090)));
     region_client.messageReceived(ctx, getMessage(
         ChannelBuffers.wrappedBuffer(GET_RESPONSE_090)));
-    
+
     @SuppressWarnings("unchecked")
     final ArrayList<KeyValue> row = (ArrayList<KeyValue>)deferred.join(1);
-    assertArrayEquals(new byte[] { 0, 0, 0, 100}, row.get(0).qualifier());
+    assertArrayEquals(new byte[]{0, 0, 0, 100}, row.get(0).qualifier());
     assertArrayEquals("*".getBytes(), row.get(0).value());
     assertEquals(1, region_client.stats().rpcsTimedout());
     assertEquals(2, timer.tasks.size());
@@ -1084,29 +1081,31 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     verify(timer.timeouts.get(0), times(1)).cancel();
     verify(timer.timeouts.get(1), times(1)).cancel();
   }
-  
+
   @Test
   public void timedoutRpcThenGoodRpc094() throws Exception {
     resetMockClient();
-    Whitebox.setInternalState(region_client, "server_version", 
-        RegionClient.SERVER_VERSION_092_OR_ABOVE);    
-    
+    Field server_versionField = region_client.getClass().getDeclaredField("server_version");
+    server_versionField.setAccessible(true);
+    server_versionField.set(region_client, RegionClient.SERVER_VERSION_092_OR_ABOVE);
+
     // this one has been timed out and we assume it was popped from the map
     final GetRequest timedout = new GetRequest(TABLE, ROW);
     timedout.setTimeout(1);
     final Deferred<Object> deferred_to = timedout.getDeferred();
     inflightTheRpc(1, timedout);
-    
+
     assertEquals(1, rpcs_inflight.size());
     assertEquals(1, timer.tasks.size());
     assertEquals(1, (long)timer.tasks.get(0).getValue());
     timer.tasks.get(0).getKey().run(null);
     assertEquals(0, rpcs_inflight.size());
-    
+
     try {
       deferred_to.join(100);
-    } catch (RpcTimedOutException ex) { }
-    
+    } catch (RpcTimedOutException ex) {
+    }
+
     final GetRequest rpc = new GetRequest(TABLE, KEY);
     final Deferred<Object> deferred = rpc.getDeferred();
     inflightTheRpc(3, rpc);
@@ -1115,10 +1114,10 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
         ChannelBuffers.wrappedBuffer(MULTI_ACTION_RESPONSE_094)));
     region_client.messageReceived(ctx, getMessage(
         ChannelBuffers.wrappedBuffer(GET_RESPONSE_094)));
-    
+
     @SuppressWarnings("unchecked")
     final ArrayList<KeyValue> row = (ArrayList<KeyValue>)deferred.join(1);
-    assertArrayEquals(new byte[] { 0, 0, 0, 100}, row.get(0).qualifier());
+    assertArrayEquals(new byte[]{0, 0, 0, 100}, row.get(0).qualifier());
     assertArrayEquals("*".getBytes(), row.get(0).value());
     assertEquals(1, region_client.stats().rpcsTimedout());
     assertEquals(2, timer.tasks.size());
@@ -1173,46 +1172,48 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     verify(timer.timeouts.get(0), times(1)).cancel();
     verify(timer.timeouts.get(1), times(1)).cancel();
   }
-  
+
   @Test
   public void combinedTimedoutRpcThenGoodRpc090() throws Exception {
     resetMockClient();
-    Whitebox.setInternalState(region_client, "server_version", 
-        RegionClient.SERVER_VERSION_090_AND_BEFORE);    
-    
+    Field server_versionField = region_client.getClass().getDeclaredField("server_version");
+    server_versionField.setAccessible(true);
+    server_versionField.set(region_client, RegionClient.SERVER_VERSION_090_AND_BEFORE);
+
     // this one has been timed out and we assume it was popped from the map
     // never mind that it's a get, not a multi action for this 94 test
     final GetRequest timedout = new GetRequest(TABLE, ROW);
     timedout.setTimeout(1);
     final Deferred<Object> deferred_to = timedout.getDeferred();
     inflightTheRpc(1, timedout);
-    
+
     assertEquals(1, rpcs_inflight.size());
     assertEquals(1, timer.tasks.size());
     assertEquals(1, (long)timer.tasks.get(0).getValue());
     timer.tasks.get(0).getKey().run(null);
     assertEquals(0, rpcs_inflight.size());
-    
+
     try {
       deferred_to.join(100);
-    } catch (RpcTimedOutException ex) { }
-    
-    final byte[] data = new byte[MULTI_ACTION_RESPONSE_090.length + 
-                                 GET_RESPONSE_090.length];
-    System.arraycopy(MULTI_ACTION_RESPONSE_090, 0, data, 0, 
+    } catch (RpcTimedOutException ex) {
+    }
+
+    final byte[] data = new byte[MULTI_ACTION_RESPONSE_090.length +
+        GET_RESPONSE_090.length];
+    System.arraycopy(MULTI_ACTION_RESPONSE_090, 0, data, 0,
         MULTI_ACTION_RESPONSE_090.length);
-    System.arraycopy(GET_RESPONSE_090, 0, data, MULTI_ACTION_RESPONSE_090.length, 
+    System.arraycopy(GET_RESPONSE_090, 0, data, MULTI_ACTION_RESPONSE_090.length,
         GET_RESPONSE_090.length);
     final GetRequest rpc = new GetRequest(TABLE, KEY);
     final Deferred<Object> deferred = rpc.getDeferred();
     inflightTheRpc(3, rpc);
-    
-    region_client.messageReceived(ctx, 
+
+    region_client.messageReceived(ctx,
         getMessage(ChannelBuffers.wrappedBuffer(data)));
 
     @SuppressWarnings("unchecked")
     final ArrayList<KeyValue> row = (ArrayList<KeyValue>)deferred.join(1);
-    assertArrayEquals(new byte[] { 0, 0, 0, 100}, row.get(0).qualifier());
+    assertArrayEquals(new byte[]{0, 0, 0, 100}, row.get(0).qualifier());
     assertArrayEquals("*".getBytes(), row.get(0).value());
     assertEquals(1, region_client.stats().rpcsTimedout());
     assertEquals(2, timer.tasks.size());
@@ -1220,46 +1221,48 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     verify(timer.timeouts.get(0), times(1)).cancel();
     verify(timer.timeouts.get(1), times(1)).cancel();
   }
-  
+
   @Test
   public void combinedTimedoutRpcThenGoodRpc094() throws Exception {
     resetMockClient();
-    Whitebox.setInternalState(region_client, "server_version", 
-        RegionClient.SERVER_VERSION_092_OR_ABOVE);    
-    
+    Field server_versionField = region_client.getClass().getDeclaredField("server_version");
+    server_versionField.setAccessible(true);
+    server_versionField.set(region_client, RegionClient.SERVER_VERSION_092_OR_ABOVE);
+
     // this one has been timed out and we assume it was popped from the map
     // never mind that it's a get, not a multi action for this 94 test
     final GetRequest timedout = new GetRequest(TABLE, ROW);
     timedout.setTimeout(1);
     final Deferred<Object> deferred_to = timedout.getDeferred();
     inflightTheRpc(1, timedout);
-    
+
     assertEquals(1, rpcs_inflight.size());
     assertEquals(1, timer.tasks.size());
     assertEquals(1, (long)timer.tasks.get(0).getValue());
     timer.tasks.get(0).getKey().run(null);
     assertEquals(0, rpcs_inflight.size());
-    
+
     try {
       deferred_to.join(100);
-    } catch (RpcTimedOutException ex) { }
-    
-    final byte[] data = new byte[MULTI_ACTION_RESPONSE_094.length + 
-                                 GET_RESPONSE_094.length];
-    System.arraycopy(MULTI_ACTION_RESPONSE_094, 0, data, 0, 
+    } catch (RpcTimedOutException ex) {
+    }
+
+    final byte[] data = new byte[MULTI_ACTION_RESPONSE_094.length +
+        GET_RESPONSE_094.length];
+    System.arraycopy(MULTI_ACTION_RESPONSE_094, 0, data, 0,
         MULTI_ACTION_RESPONSE_094.length);
-    System.arraycopy(GET_RESPONSE_094, 0, data, MULTI_ACTION_RESPONSE_094.length, 
+    System.arraycopy(GET_RESPONSE_094, 0, data, MULTI_ACTION_RESPONSE_094.length,
         GET_RESPONSE_094.length);
     final GetRequest rpc = new GetRequest(TABLE, KEY);
     final Deferred<Object> deferred = rpc.getDeferred();
     inflightTheRpc(3, rpc);
-    
-    region_client.messageReceived(ctx, 
+
+    region_client.messageReceived(ctx,
         getMessage(ChannelBuffers.wrappedBuffer(data)));
 
     @SuppressWarnings("unchecked")
     final ArrayList<KeyValue> row = (ArrayList<KeyValue>)deferred.join(1);
-    assertArrayEquals(new byte[] { 0, 0, 0, 100}, row.get(0).qualifier());
+    assertArrayEquals(new byte[]{0, 0, 0, 100}, row.get(0).qualifier());
     assertArrayEquals("*".getBytes(), row.get(0).value());
     assertEquals(1, region_client.stats().rpcsTimedout());
     assertEquals(2, timer.tasks.size());
@@ -1315,13 +1318,14 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     verify(timer.timeouts.get(0), times(1)).cancel();
     verify(timer.timeouts.get(1), times(1)).cancel();
   }
-  
+
   @Test
   public void chunkedLateRpcThenGoodRpc090() throws Exception {
     resetMockClient();
-    Whitebox.setInternalState(region_client, "server_version", 
-        RegionClient.SERVER_VERSION_090_AND_BEFORE);    
-    
+    Field server_versionField = region_client.getClass().getDeclaredField("server_version");
+    server_versionField.setAccessible(true);
+    server_versionField.set(region_client, RegionClient.SERVER_VERSION_090_AND_BEFORE);
+
     final GetRequest timedout = new GetRequest(TABLE, ROW);
     timedout.setTimeout(1);
     final Deferred<Object> deferred_to = timedout.getDeferred();
@@ -1331,31 +1335,32 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     assertEquals(1, (long)timer.tasks.get(0).getValue());
     timer.tasks.get(0).getKey().run(null);
     assertEquals(0, rpcs_inflight.size());
-    
+
     final GetRequest rpc = new GetRequest(TABLE, KEY);
     final Deferred<Object> deferred = rpc.getDeferred();
     inflightTheRpc(3, rpc);
-    
+
     int cutoff = 48;
-    final byte[] data = new byte[MULTI_ACTION_RESPONSE_090.length + 
-                                 GET_RESPONSE_090.length - cutoff];
-    System.arraycopy(MULTI_ACTION_RESPONSE_090, cutoff, data, 0, 
+    final byte[] data = new byte[MULTI_ACTION_RESPONSE_090.length +
+        GET_RESPONSE_090.length - cutoff];
+    System.arraycopy(MULTI_ACTION_RESPONSE_090, cutoff, data, 0,
         MULTI_ACTION_RESPONSE_090.length - cutoff);
-    System.arraycopy(GET_RESPONSE_090, 0, data, 
-        MULTI_ACTION_RESPONSE_090.length - cutoff, 
+    System.arraycopy(GET_RESPONSE_090, 0, data,
+        MULTI_ACTION_RESPONSE_090.length - cutoff,
         GET_RESPONSE_090.length);
-    
+
     region_client.messageReceived(ctx, getMessage(
         Arrays.copyOfRange(MULTI_ACTION_RESPONSE_090, 0, cutoff)));
     region_client.messageReceived(ctx, getMessage(data));
-    
+
     try {
       deferred_to.join(100);
-    } catch (RpcTimedOutException ex) { }
-    
+    } catch (RpcTimedOutException ex) {
+    }
+
     @SuppressWarnings("unchecked")
     final ArrayList<KeyValue> row = (ArrayList<KeyValue>)deferred.join(1);
-    assertArrayEquals(new byte[] { 0, 0, 0, 100}, row.get(0).qualifier());
+    assertArrayEquals(new byte[]{0, 0, 0, 100}, row.get(0).qualifier());
     assertArrayEquals("*".getBytes(), row.get(0).value());
     assertEquals(1, region_client.stats().rpcsTimedout());
     assertEquals(2, timer.tasks.size());
@@ -1363,13 +1368,14 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     verify(timer.timeouts.get(0), times(1)).cancel();
     verify(timer.timeouts.get(1), times(1)).cancel();
   }
-  
+
   @Test
   public void chunkedLateRpcThenGoodRpc094() throws Exception {
     resetMockClient();
-    Whitebox.setInternalState(region_client, "server_version", 
-        RegionClient.SERVER_VERSION_092_OR_ABOVE);    
-    
+    Field server_versionField = region_client.getClass().getDeclaredField("server_version");
+    server_versionField.setAccessible(true);
+    server_versionField.set(region_client, RegionClient.SERVER_VERSION_092_OR_ABOVE);
+
     final GetRequest timedout = new GetRequest(TABLE, ROW);
     timedout.setTimeout(1);
     final Deferred<Object> deferred_to = timedout.getDeferred();
@@ -1379,31 +1385,32 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     assertEquals(1, (long)timer.tasks.get(0).getValue());
     timer.tasks.get(0).getKey().run(null);
     assertEquals(0, rpcs_inflight.size());
-    
+
     final GetRequest rpc = new GetRequest(TABLE, KEY);
     final Deferred<Object> deferred = rpc.getDeferred();
     inflightTheRpc(3, rpc);
-    
+
     int cutoff = 48;
-    final byte[] data = new byte[MULTI_ACTION_RESPONSE_094.length + 
-                                 GET_RESPONSE_094.length - cutoff];
-    System.arraycopy(MULTI_ACTION_RESPONSE_094, cutoff, data, 0, 
+    final byte[] data = new byte[MULTI_ACTION_RESPONSE_094.length +
+        GET_RESPONSE_094.length - cutoff];
+    System.arraycopy(MULTI_ACTION_RESPONSE_094, cutoff, data, 0,
         MULTI_ACTION_RESPONSE_094.length - cutoff);
-    System.arraycopy(GET_RESPONSE_094, 0, data, 
-        MULTI_ACTION_RESPONSE_094.length - cutoff, 
+    System.arraycopy(GET_RESPONSE_094, 0, data,
+        MULTI_ACTION_RESPONSE_094.length - cutoff,
         GET_RESPONSE_094.length);
-    
+
     region_client.messageReceived(ctx, getMessage(
         Arrays.copyOfRange(MULTI_ACTION_RESPONSE_094, 0, cutoff)));
     region_client.messageReceived(ctx, getMessage(data));
-    
+
     try {
       deferred_to.join(100);
-    } catch (RpcTimedOutException ex) { }
-    
+    } catch (RpcTimedOutException ex) {
+    }
+
     @SuppressWarnings("unchecked")
     final ArrayList<KeyValue> row = (ArrayList<KeyValue>)deferred.join(1);
-    assertArrayEquals(new byte[] { 0, 0, 0, 100}, row.get(0).qualifier());
+    assertArrayEquals(new byte[]{0, 0, 0, 100}, row.get(0).qualifier());
     assertArrayEquals("*".getBytes(), row.get(0).value());
     assertEquals(1, region_client.stats().rpcsTimedout());
     assertEquals(2, timer.tasks.size());
@@ -1465,7 +1472,7 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     verify(timer.timeouts.get(0), times(1)).cancel();
     verify(timer.timeouts.get(1), times(1)).cancel();
   }
-  
+
   @Test
   public void multiActionSuccess() throws Exception {
     final int id = 42;
@@ -1480,29 +1487,31 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     multi.add(put2);
     Deferred<Object> deferred = multi.getDeferred();
     inflightTheRpc(id, multi);
-    
-    Whitebox.invokeMethod(region_client, "addMultiActionCallbacks", multi);
-    
+
+    Method addMultiActionCallbacksMethod = region_client.getClass().getDeclaredMethod("addMultiActionCallbacks", MultiAction.class);
+    addMultiActionCallbacksMethod.setAccessible(true);
+    addMultiActionCallbacksMethod.invoke(region_client, multi);
+
     final List<ResultOrException> results = new ArrayList<ResultOrException>(2);
     results.add(PBufResponses.generateEmptyResult(0));
     results.add(PBufResponses.generateEmptyResult(1));
-    
+
     final RPCPB.ResponseHeader header = RPCPB.ResponseHeader.newBuilder()
         .setCallId(id)
         //.setCellBlockMeta(meta)
         .build();
-    
+
     final ChannelBuffer buffer = PBufResponses.writeToBuffer(
         header,
         PBufResponses.generateMultiActionResponse(results));
-    
+
     assertNull(region_client.decode(ctx, chan, buffer, VOID));
-    
-    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()), 
+
+    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, never()).handleNSRE(eq(put2), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(put2), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
     verify(hbase_client, never()).newTimeout(any(TimerTask.class), anyLong());
     assertSame(MultiAction.SUCCESS, deferred1.join(1));
@@ -1512,7 +1521,7 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     assertNull(put2.timeoutHandle());
     assertNull(multi.timeoutHandle());
   }
-  
+
 
   @Test
   public void multiActionFailAllRegionServerStoppedException() throws Exception {
@@ -1528,35 +1537,39 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     multi.add(put2);
     Deferred<Object> deferred = multi.getDeferred();
     inflightTheRpc(id, multi);
-    
-    Whitebox.invokeMethod(region_client, "addMultiActionCallbacks", multi);
-        
-    ChannelBuffer buffer = PBufResponses.generateException(id, 
+
+    Method addMultiActionCallbacksMethod = region_client.getClass().getDeclaredMethod("addMultiActionCallbacks", MultiAction.class);
+    addMultiActionCallbacksMethod.setAccessible(true);
+    addMultiActionCallbacksMethod.invoke(region_client, multi);
+
+    ChannelBuffer buffer = PBufResponses.generateException(id,
         "org.apache.hadoop.hbase.regionserver.RegionServerStoppedException");
-    
+
     assertNull(region_client.decode(ctx, chan, buffer, VOID));
-    verify(hbase_client, times(1)).handleNSRE(eq(put1), eq(region.name()), 
+    verify(hbase_client, times(1)).handleNSRE(eq(put1), eq(region.name()),
         any(RecoverableException.class), anyString());
-    verify(hbase_client, times(1)).handleNSRE(eq(put2), eq(region.name()), 
+    verify(hbase_client, times(1)).handleNSRE(eq(put2), eq(region.name()),
         any(RecoverableException.class), anyString());
-    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()),
         any(RecoverableException.class), anyString());
     verify(hbase_client, never()).newTimeout(any(TimerTask.class), anyLong());
     try {
       deferred1.join(1);
       fail("Expected a TimeoutException");
-    } catch (TimeoutException e) { }
+    } catch (TimeoutException e) {
+    }
     try {
       deferred2.join(1);
       fail("Expected a TimeoutException");
-    } catch (TimeoutException e) { }
+    } catch (TimeoutException e) {
+    }
     assertNull(deferred.join(1));
     assertNull(multi.timeoutHandle());
     assertNull(put1.timeoutHandle());
     assertNull(put2.timeoutHandle());
     assertNull(multi.timeoutHandle());
   }
-  
+
   @Test
   public void multiActionFailAllVersionMismatchException() throws Exception {
     final int id = 42;
@@ -1571,37 +1584,42 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     multi.add(put2);
     Deferred<Object> deferred = multi.getDeferred();
     inflightTheRpc(id, multi);
-    
-    Whitebox.invokeMethod(region_client, "addMultiActionCallbacks", multi);
-        
-    ChannelBuffer buffer = PBufResponses.generateException(id, 
+
+    Method addMultiActionCallbacksMethod = region_client.getClass().getDeclaredMethod("addMultiActionCallbacks", MultiAction.class);
+    addMultiActionCallbacksMethod.setAccessible(true);
+    addMultiActionCallbacksMethod.invoke(region_client, multi);
+
+    ChannelBuffer buffer = PBufResponses.generateException(id,
         "org.apache.hadoop.io.VersionMismatchException");
-    
+
     assertNull(region_client.decode(ctx, chan, buffer, VOID));
-    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, never()).handleNSRE(eq(put2), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(put2), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
     verify(hbase_client, never()).newTimeout(any(TimerTask.class), anyLong());
     try {
       deferred1.join(1);
       fail("Expected a VersionMismatchException");
-    } catch (VersionMismatchException e) { }
+    } catch (VersionMismatchException e) {
+    }
     try {
       deferred2.join(1);
       fail("Expected a VersionMismatchException");
-    } catch (VersionMismatchException e) { }
+    } catch (VersionMismatchException e) {
+    }
     try {
       deferred.join(1);
-    } catch (VersionMismatchException e) { }
+    } catch (VersionMismatchException e) {
+    }
     assertNull(multi.timeoutHandle());
     assertNull(put1.timeoutHandle());
     assertNull(put2.timeoutHandle());
     assertNull(multi.timeoutHandle());
   }
-  
+
   @Test
   public void multiActionFailAllUnknownRemoteException() throws Exception {
     final int id = 42;
@@ -1616,37 +1634,42 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     multi.add(put2);
     Deferred<Object> deferred = multi.getDeferred();
     inflightTheRpc(id, multi);
-    
-    Whitebox.invokeMethod(region_client, "addMultiActionCallbacks", multi);
-        
-    ChannelBuffer buffer = PBufResponses.generateException(id, 
+
+    Method addMultiActionCallbacksMethod = region_client.getClass().getDeclaredMethod("addMultiActionCallbacks", MultiAction.class);
+    addMultiActionCallbacksMethod.setAccessible(true);
+    addMultiActionCallbacksMethod.invoke(region_client, multi);
+
+    ChannelBuffer buffer = PBufResponses.generateException(id,
         "org.hbase.SomeNewException");
-    
+
     assertNull(region_client.decode(ctx, chan, buffer, VOID));
-    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, never()).handleNSRE(eq(put2), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(put2), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
     verify(hbase_client, never()).newTimeout(any(TimerTask.class), anyLong());
     try {
       deferred1.join(1);
       fail("Expected a RemoteException");
-    } catch (RemoteException e) { }
+    } catch (RemoteException e) {
+    }
     try {
       deferred2.join(1);
       fail("Expected a RemoteException");
-    } catch (RemoteException e) { }
+    } catch (RemoteException e) {
+    }
     try {
       deferred.join(1);
-    } catch (RemoteException e) { }
+    } catch (RemoteException e) {
+    }
     assertNull(multi.timeoutHandle());
     assertNull(put1.timeoutHandle());
     assertNull(put2.timeoutHandle());
     assertNull(multi.timeoutHandle());
   }
-  
+
   @Test
   public void multiActionOneNSREd() throws Exception {
     final int id = 42;
@@ -1661,43 +1684,46 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     multi.add(put2);
     Deferred<Object> deferred = multi.getDeferred();
     inflightTheRpc(id, multi);
-    
-    Whitebox.invokeMethod(region_client, "addMultiActionCallbacks", multi);
-    
+
+    Method addMultiActionCallbacksMethod = region_client.getClass().getDeclaredMethod("addMultiActionCallbacks", MultiAction.class);
+    addMultiActionCallbacksMethod.setAccessible(true);
+    addMultiActionCallbacksMethod.invoke(region_client, multi);
+
     final List<ResultOrException> results = new ArrayList<ResultOrException>(2);
     results.add(PBufResponses.generateEmptyResult(0));
     results.add(PBufResponses.generateException(
         NotServingRegionException.REMOTE_CLASS, "", 1));
-    
+
     final RPCPB.ResponseHeader header = RPCPB.ResponseHeader.newBuilder()
         .setCallId(id)
         //.setCellBlockMeta(meta)
         .build();
-    
+
     final ChannelBuffer buffer = PBufResponses.writeToBuffer(
         header,
         PBufResponses.generateMultiActionResponse(results));
-    
+
     assertNull(region_client.decode(ctx, chan, buffer, VOID));
-    
-    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()), 
+
+    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, times(1)).handleNSRE(eq(put2), eq(region.name()), 
+    verify(hbase_client, times(1)).handleNSRE(eq(put2), eq(region.name()),
         any(RecoverableException.class), anyString());
-    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
     verify(hbase_client, never()).newTimeout(any(TimerTask.class), anyLong());
     assertSame(MultiAction.SUCCESS, deferred1.join(1));
     try {
       deferred2.join(1);
       fail("Expected a TimeoutException");
-    } catch (TimeoutException e) { }
+    } catch (TimeoutException e) {
+    }
     assertNull(deferred.join(1));
     assertNull(put1.timeoutHandle());
     assertNull(put2.timeoutHandle());
     assertNull(multi.timeoutHandle());
   }
-  
+
   @Test
   public void multiActionOneRegionMovedException() throws Exception {
     final int id = 42;
@@ -1712,43 +1738,46 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     multi.add(put2);
     Deferred<Object> deferred = multi.getDeferred();
     inflightTheRpc(id, multi);
-    
-    Whitebox.invokeMethod(region_client, "addMultiActionCallbacks", multi);
-    
+
+    Method addMultiActionCallbacksMethod = region_client.getClass().getDeclaredMethod("addMultiActionCallbacks", MultiAction.class);
+    addMultiActionCallbacksMethod.setAccessible(true);
+    addMultiActionCallbacksMethod.invoke(region_client, multi);
+
     final List<ResultOrException> results = new ArrayList<ResultOrException>(2);
     results.add(PBufResponses.generateEmptyResult(0));
     results.add(PBufResponses.generateException(
         RegionMovedException.REMOTE_CLASS, "", 1));
-    
+
     final RPCPB.ResponseHeader header = RPCPB.ResponseHeader.newBuilder()
         .setCallId(id)
         //.setCellBlockMeta(meta)
         .build();
-    
+
     final ChannelBuffer buffer = PBufResponses.writeToBuffer(
         header,
         PBufResponses.generateMultiActionResponse(results));
-    
+
     assertNull(region_client.decode(ctx, chan, buffer, VOID));
-    
-    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()), 
+
+    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, times(1)).handleNSRE(eq(put2), eq(region.name()), 
+    verify(hbase_client, times(1)).handleNSRE(eq(put2), eq(region.name()),
         any(RecoverableException.class), anyString());
-    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
     verify(hbase_client, never()).newTimeout(any(TimerTask.class), anyLong());
     assertSame(MultiAction.SUCCESS, deferred1.join(1));
     try {
       deferred2.join(1);
       fail("Expected a TimeoutException");
-    } catch (TimeoutException e) { }
+    } catch (TimeoutException e) {
+    }
     assertNull(deferred.join(1));
     assertNull(put1.timeoutHandle());
     assertNull(put2.timeoutHandle());
     assertNull(multi.timeoutHandle());
   }
-  
+
   @Test
   public void multiActionOneRegionOpeningException() throws Exception {
     final int id = 42;
@@ -1765,44 +1794,47 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     multi.add(put2);
     Deferred<Object> deferred = multi.getDeferred();
     inflightTheRpc(id, multi);
-    
-    Whitebox.invokeMethod(region_client, "addMultiActionCallbacks", multi);
-    
+
+    Method addMultiActionCallbacksMethod = region_client.getClass().getDeclaredMethod("addMultiActionCallbacks", MultiAction.class);
+    addMultiActionCallbacksMethod.setAccessible(true);
+    addMultiActionCallbacksMethod.invoke(region_client, multi);
+
     final List<ResultOrException> results = new ArrayList<ResultOrException>(2);
     results.add(PBufResponses.generateEmptyResult(0));
     results.add(PBufResponses.generateException(
         RegionOpeningException.REMOTE_CLASS, "", 1));
-    
+
     final RPCPB.ResponseHeader header = RPCPB.ResponseHeader.newBuilder()
         .setCallId(id)
         //.setCellBlockMeta(meta)
         .build();
-    
+
     final ChannelBuffer buffer = PBufResponses.writeToBuffer(
         header,
         PBufResponses.generateMultiActionResponse(results));
-    
+
     assertNull(region_client.decode(ctx, chan, buffer, VOID));
-    
-    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()), 
+
+    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, never()).handleNSRE(eq(put2), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(put2), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
     verify(hbase_client, times(1)).newTimeout(any(TimerTask.class), anyLong());
     assertSame(MultiAction.SUCCESS, deferred1.join(1));
     try {
       deferred2.join(1);
       fail("Expected a TimeoutException");
-    } catch (TimeoutException e) { }
+    } catch (TimeoutException e) {
+    }
     assertNull(deferred.join(1));
     assertNull(put1.timeoutHandle());
     assertNull(put2.timeoutHandle());
     assertNull(multi.timeoutHandle());
     assertFalse(put2.bufferable);
   }
-  
+
   // for a future PR.
 //  @Test
 //  public void multiActionOneRegionOpeningExceptionReBatch() throws Exception {
@@ -1872,43 +1904,46 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     multi.add(put2);
     Deferred<Object> deferred = multi.getDeferred();
     inflightTheRpc(id, multi);
-    
-    Whitebox.invokeMethod(region_client, "addMultiActionCallbacks", multi);
-    
+
+    Method addMultiActionCallbacksMethod = region_client.getClass().getDeclaredMethod("addMultiActionCallbacks", MultiAction.class);
+    addMultiActionCallbacksMethod.setAccessible(true);
+    addMultiActionCallbacksMethod.invoke(region_client, multi);
+
     final List<ResultOrException> results = new ArrayList<ResultOrException>(2);
     results.add(PBufResponses.generateEmptyResult(0));
     results.add(PBufResponses.generateException(
         RegionServerStoppedException.REMOTE_CLASS, "", 1));
-    
+
     final RPCPB.ResponseHeader header = RPCPB.ResponseHeader.newBuilder()
         .setCallId(id)
         //.setCellBlockMeta(meta)
         .build();
-    
+
     final ChannelBuffer buffer = PBufResponses.writeToBuffer(
         header,
         PBufResponses.generateMultiActionResponse(results));
-    
+
     assertNull(region_client.decode(ctx, chan, buffer, VOID));
-    
-    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()), 
+
+    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, times(1)).handleNSRE(eq(put2), eq(region.name()), 
+    verify(hbase_client, times(1)).handleNSRE(eq(put2), eq(region.name()),
         any(RecoverableException.class), anyString());
-    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
     verify(hbase_client, never()).newTimeout(any(TimerTask.class), anyLong());
     assertSame(MultiAction.SUCCESS, deferred1.join(1));
     try {
       deferred2.join(1);
       fail("Expected a TimeoutException");
-    } catch (TimeoutException e) { }
+    } catch (TimeoutException e) {
+    }
     assertNull(deferred.join(1));
     assertNull(put1.timeoutHandle());
     assertNull(put2.timeoutHandle());
     assertNull(multi.timeoutHandle());
   }
-  
+
   @Test
   public void multiActionOneNoSuchColumnFamilyException() throws Exception {
     final int id = 42;
@@ -1923,43 +1958,46 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     multi.add(put2);
     Deferred<Object> deferred = multi.getDeferred();
     inflightTheRpc(id, multi);
-    
-    Whitebox.invokeMethod(region_client, "addMultiActionCallbacks", multi);
-    
+
+    Method addMultiActionCallbacksMethod = region_client.getClass().getDeclaredMethod("addMultiActionCallbacks", MultiAction.class);
+    addMultiActionCallbacksMethod.setAccessible(true);
+    addMultiActionCallbacksMethod.invoke(region_client, multi);
+
     final List<ResultOrException> results = new ArrayList<ResultOrException>(2);
     results.add(PBufResponses.generateEmptyResult(0));
     results.add(PBufResponses.generateException(
         NoSuchColumnFamilyException.REMOTE_CLASS, "", 1));
-    
+
     final RPCPB.ResponseHeader header = RPCPB.ResponseHeader.newBuilder()
         .setCallId(id)
         //.setCellBlockMeta(meta)
         .build();
-    
+
     final ChannelBuffer buffer = PBufResponses.writeToBuffer(
         header,
         PBufResponses.generateMultiActionResponse(results));
-    
+
     assertNull(region_client.decode(ctx, chan, buffer, VOID));
-    
-    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()), 
+
+    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, never()).handleNSRE(eq(put2), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(put2), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
     verify(hbase_client, never()).newTimeout(any(TimerTask.class), anyLong());
     assertSame(MultiAction.SUCCESS, deferred1.join(1));
     try {
       deferred2.join(1);
       fail("Expected a NoSuchColumnFamilyException");
-    } catch (NoSuchColumnFamilyException e) { }
+    } catch (NoSuchColumnFamilyException e) {
+    }
     assertNull(deferred.join(1));
     assertNull(put1.timeoutHandle());
     assertNull(put2.timeoutHandle());
     assertNull(multi.timeoutHandle());
   }
-  
+
   @Test
   public void multiActionOneUnknownRemoteException() throws Exception {
     final int id = 42;
@@ -1974,37 +2012,40 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     multi.add(put2);
     Deferred<Object> deferred = multi.getDeferred();
     inflightTheRpc(id, multi);
-    
-    Whitebox.invokeMethod(region_client, "addMultiActionCallbacks", multi);
-    
+
+    Method addMultiActionCallbacksMethod = region_client.getClass().getDeclaredMethod("addMultiActionCallbacks", MultiAction.class);
+    addMultiActionCallbacksMethod.setAccessible(true);
+    addMultiActionCallbacksMethod.invoke(region_client, multi);
+
     final List<ResultOrException> results = new ArrayList<ResultOrException>(2);
     results.add(PBufResponses.generateEmptyResult(0));
     results.add(PBufResponses.generateException(
         "org.hbase.SomeNewException", "", 1));
-    
+
     final RPCPB.ResponseHeader header = RPCPB.ResponseHeader.newBuilder()
         .setCallId(id)
         //.setCellBlockMeta(meta)
         .build();
-    
+
     final ChannelBuffer buffer = PBufResponses.writeToBuffer(
         header,
         PBufResponses.generateMultiActionResponse(results));
-    
+
     assertNull(region_client.decode(ctx, chan, buffer, VOID));
-    
-    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()), 
+
+    verify(hbase_client, never()).handleNSRE(eq(put1), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, never()).handleNSRE(eq(put2), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(put2), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
-    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()), 
+    verify(hbase_client, never()).handleNSRE(eq(multi), eq(region.name()),
         any(RecoverableException.class), eq(REMOTE_ADDRESS));
     verify(hbase_client, never()).newTimeout(any(TimerTask.class), anyLong());
     assertSame(MultiAction.SUCCESS, deferred1.join(1));
     try {
       deferred2.join(1);
       fail("Expected a RemoteException");
-    } catch (RemoteException e) { }
+    } catch (RemoteException e) {
+    }
     assertNull(deferred.join(1));
     assertNull(put1.timeoutHandle());
     assertNull(put2.timeoutHandle());
@@ -2030,8 +2071,8 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
     verify(timer.timeouts.get(0), never()).cancel();
     verify(hbase_client, never()).newTimeout(any(TimerTask.class), anyLong());
   }
-  
-  
+
+
   /**
    * Puts the RPC in the map with the given ID and tells the RPC that this
    * region client is handling it
@@ -2083,9 +2124,9 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
         .build();
     
     final int hlen = header.getSerializedSize();
-    final int vhlen = CodedOutputStream.computeRawVarint32Size(hlen);
+    final int vhlen = CodedOutputStream.computeUInt32SizeNoTag(hlen);
     final int pblen = get_response.getSerializedSize();
-    final int vlen = CodedOutputStream.computeRawVarint32Size(pblen);
+    final int vlen = CodedOutputStream.computeUInt32SizeNoTag(pblen);
     final byte[] buf = new byte[hlen + vhlen + vlen + pblen + 4];
     final CodedOutputStream out = CodedOutputStream.newInstance(buf, 4, 
         hlen + vhlen + vlen + pblen);
@@ -2104,6 +2145,7 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
   /** Simple test implementation of the HBaseException class */
   class TestingHBaseException extends HBaseException {
     private static final long serialVersionUID = 7717718589747017699L;
+
     TestingHBaseException(final String msg) {
       super(msg);
     }
@@ -2119,9 +2161,12 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
    */
   private void resetMockClient() throws Exception {
     region_client = new RegionClient(hbase_client, null, "localhost");
-    Whitebox.setInternalState(region_client, "chan", chan);
-    Whitebox.setInternalState(region_client, "server_version", 
-        RegionClient.SERVER_VERSION_095_OR_ABOVE);
+    Field chanField = region_client.getClass().getDeclaredField("chan");
+    chanField.setAccessible(true);
+    chanField.set(region_client, chan);
+    Field server_versionField = region_client.getClass().getDeclaredField("server_version");
+    server_versionField.setAccessible(true);
+    server_versionField.set(region_client, RegionClient.SERVER_VERSION_095_OR_ABOVE);
     rpcs_inflight = Whitebox.getInternalState(
         region_client, "rpcs_inflight");
   }

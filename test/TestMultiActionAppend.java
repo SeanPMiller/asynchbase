@@ -26,24 +26,17 @@
  */
 package org.hbase.async;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotSame;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.fail;
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyString;
-import static org.mockito.Matchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.Assert.*;
 
+import static org.mockito.Mockito.*;
+
+import java.lang.reflect.Field;
 import java.net.SocketAddress;
 import java.util.ArrayList;
 import java.util.List;
 
+
+import com.google.common.collect.Lists;
 import org.hbase.async.generated.ClientPB.MultiRequest;
 import org.hbase.async.generated.ClientPB.MultiResponse;
 import org.hbase.async.generated.ClientPB.MutationProto.MutationType;
@@ -52,17 +45,10 @@ import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.channel.Channel;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
-import org.powermock.reflect.Whitebox;
 
-import com.google.common.collect.Lists;
 import com.stumbleupon.async.Deferred;
 import com.stumbleupon.async.TimeoutException;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest({ HBaseClient.class, Channel.class })
 public class TestMultiActionAppend {
   
   protected static final byte[] TABLE = { 't', 'a', 'b', 'l', 'e' };
@@ -87,18 +73,18 @@ public class TestMultiActionAppend {
   private DeleteRequest delete;
   private AppendRequest append;
   private Channel channel;
-  
+
   @Before
-  public void beforeLocal() {
+  public void beforeLocal() throws Exception {
     put1 = new PutRequest(TABLE, KEY, FAMILY, QUALIFIER, VALUE);
-    put2 = new PutRequest(TABLE, KEY, FAMILY, QUALIFIER, new byte[] { 'v', '2' });
-    put3 = new PutRequest(TABLE, KEY, FAMILY, new byte[] { 'q', '2' }, VALUE);
-    put4 = new PutRequest(TABLE, KEY, new byte[] { 'f', '2' }, QUALIFIER, VALUE);
-    put5 = new PutRequest(TABLE, new byte[] { 'k', '2' }, FAMILY, QUALIFIER, VALUE);
-    put6 = new PutRequest(new byte[] { 't', '2' }, KEY, FAMILY, QUALIFIER, VALUE);
+    put2 = new PutRequest(TABLE, KEY, FAMILY, QUALIFIER, new byte[]{'v', '2'});
+    put3 = new PutRequest(TABLE, KEY, FAMILY, new byte[]{'q', '2'}, VALUE);
+    put4 = new PutRequest(TABLE, KEY, new byte[]{'f', '2'}, QUALIFIER, VALUE);
+    put5 = new PutRequest(TABLE, new byte[]{'k', '2'}, FAMILY, QUALIFIER, VALUE);
+    put6 = new PutRequest(new byte[]{'t', '2'}, KEY, FAMILY, QUALIFIER, VALUE);
     delete = new DeleteRequest(TABLE, KEY, FAMILY, QUALIFIER);
     append = new AppendRequest(TABLE, KEY, FAMILY, QUALIFIER, VALUE);
-    
+
     put1.region = TABLE_REGION;
     put2.region = TABLE_REGION;
     put3.region = TABLE_REGION;
@@ -107,14 +93,16 @@ public class TestMultiActionAppend {
     put6.region = PRE94_META;
     delete.region = TABLE_REGION;
     append.region = TABLE_REGION;
-    
+
     client = mock(HBaseClient.class);
     Config config = new Config();
     when(client.getConfig()).thenReturn(config);
     rc = new RegionClient(client, null, "localhost");
     channel = mock(Channel.class);
     when(channel.getLocalAddress()).thenReturn(mock(SocketAddress.class));
-    Whitebox.setInternalState(rc, "chan", channel);
+    Field chanField = rc.getClass().getDeclaredField("chan");
+    chanField.setAccessible(true);
+    chanField.set(rc, channel);
   }
   
   @Test
@@ -343,7 +331,7 @@ public class TestMultiActionAppend {
     Deferred<Object> p3 = put3.getDeferred();
     final ChannelBuffer buf = multi.serialize(RegionClient.SERVER_VERSION_095_OR_ABOVE);
     buf.readerIndex(4 + 19 + MultiAction.MMULTI.length);
-    
+
 
     final List<ResultOrException> results = new ArrayList<ResultOrException>(2);
     results.add(PBufResponses.generateEmptyResult(0));

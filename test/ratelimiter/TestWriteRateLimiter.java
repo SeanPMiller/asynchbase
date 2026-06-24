@@ -26,22 +26,12 @@
  */
 package org.hbase.async.ratelimiter;
 
+import static org.junit.Assert.*;
+
+import static org.mockito.Mockito.*;
+
+
 import com.google.common.util.concurrent.RateLimiter;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.mockito.Matchers.anyDouble;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mock;
-
-import org.junit.Before;
-import org.junit.Test;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-
 import org.hbase.async.AppendRequest;
 import org.hbase.async.BaseTestHBaseClient.FakeTaskTimer;
 import org.hbase.async.HBaseClient;
@@ -52,16 +42,14 @@ import org.hbase.async.RegionClient;
 import org.hbase.async.generated.RPCPB;
 import org.hbase.async.ratelimiter.WriteRateLimiter.SIGNAL;
 import org.jboss.netty.channel.Channels;
-import org.junit.runner.RunWith;
+import org.junit.Before;
+import org.junit.Test;
+
+import org.mockito.MockedConstruction;
+import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-import org.powermock.modules.junit4.PowerMockRunner;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest({ HBaseClient.class, RegionClient.class, Channels.class,
-    RPCPB.ResponseHeader.class, NotServingRegionException.class,
-    RPCPB.ExceptionResponse.class, HBaseRpc.class,
-    AppendRequest.class, PutRequest.class, RateLimiter.class })
 public class TestWriteRateLimiter {
 
   private WriteRateLimiter limiter;
@@ -73,14 +61,14 @@ public class TestWriteRateLimiter {
 
   @Before
   public void before() throws Exception {
-    timer = new FakeTaskTimer();
-    rate_policy = new RateLimitPolicyImpl();
-    threshold_policy = new ThresholdLimitPolicyImpl();
-    guava_limiter = mock(RateLimiter.class);
-    regin_client = mock(RegionClient.class);
-
-    PowerMockito.whenNew(RateLimiter.class).withAnyArguments().thenReturn(guava_limiter);
-    PowerMockito.when(regin_client.toString()).thenReturn("rc1");
+    try (MockedConstruction<RateLimiter> mockRateLimiter = Mockito.mockConstruction(RateLimiter.class)) {
+      timer = new FakeTaskTimer();
+      rate_policy = new RateLimitPolicyImpl();
+      threshold_policy = new ThresholdLimitPolicyImpl();
+      guava_limiter = mock(RateLimiter.class);
+      regin_client = mock(RegionClient.class);
+      Mockito.when(regin_client.toString()).thenReturn("rc1");
+    }
   }
 
   @Test
@@ -306,8 +294,6 @@ public class TestWriteRateLimiter {
     
     public MockRateLimiter() {
       limiter = mock(RateLimiter.class);
-      
-      PowerMockito.mockStatic(RateLimiter.class);
       
       // since the limiter may be nulled and created anew, make sure to reset
       // counters and flags.

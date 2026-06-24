@@ -26,37 +26,28 @@
  */
 package org.hbase.async;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-import static org.mockito.Matchers.any;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.junit.Assert.*;
+
+import static org.mockito.Mockito.*;
 
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+
 import org.hbase.async.generated.ClientPB.MultiRequest;
 import org.hbase.async.generated.ClientPB.MultiResponse;
 import org.hbase.async.generated.ClientPB.RegionAction;
 import org.hbase.async.generated.ClientPB.RegionActionResult;
-import org.hbase.async.generated.ClientPB.ResultOrException;
 import org.hbase.async.generated.ClientPB.RegionActionResult.Builder;
+import org.hbase.async.generated.ClientPB.ResultOrException;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.junit.Test;
-import org.junit.runner.RunWith;
+
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest({ RowLock.class })
 public class TestMultiAction extends BaseTestHBaseClient {
   protected static final RegionInfo region2 = 
       mkregion("table", "table,A,1234567890");

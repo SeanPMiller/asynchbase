@@ -26,19 +26,19 @@
  */
 package org.hbase.async;
 
-import java.util.Comparator;
-
-import org.junit.Test;
-import org.junit.runner.RunWith;
 import static org.junit.Assert.fail;
 
+import java.util.Comparator;
+
+
+import org.junit.Test;
+
 import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
 
 /**
  * Unit tests for META lookups and associated regressions.
  */
-@RunWith(PowerMockRunner.class)
+
 @PrepareForTest
 final class TestMETALookup {
 

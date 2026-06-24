@@ -26,13 +26,12 @@
  */
 package org.hbase.async;
 
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyInt;
-import static org.mockito.Matchers.anyString;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mock;
 
+import java.lang.reflect.Field;
 import java.util.Map;
+
 
 import org.hbase.async.BaseTestHBaseClient.FakeTimer;
 import org.hbase.async.generated.RPCPB;
@@ -43,26 +42,13 @@ import org.jboss.netty.channel.ChannelHandlerContext;
 import org.jboss.netty.channel.ChannelStateEvent;
 import org.jboss.netty.channel.Channels;
 import org.junit.Before;
-import org.junit.runner.RunWith;
+
 import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+
 import org.powermock.reflect.Whitebox;
 
-@RunWith(PowerMockRunner.class)
-//"Classloader hell"...  It's real.  Tell PowerMock to ignore these classes
-//because they fiddle with the class loader.  We don't test them anyway.
-@PowerMockIgnore({"javax.management.*", "javax.xml.*",
-           "ch.qos.*", "org.slf4j.*",
-           "com.sum.*", "org.xml.*"})
-@PrepareForTest({ HBaseClient.class, RegionClient.class, Channels.class,
-  RPCPB.ResponseHeader.class, NotServingRegionException.class, Config.class,
-  RegionInfo.class, RPCPB.ExceptionResponse.class, HBaseRpc.class, 
-  SecureRpcHelper.class })
 public class BaseTestRegionClient {
   protected static final String host = "127.0.0.1";
   protected static final byte[] TABLE = { 't', 'a', 'b', 'l', 'e' };
@@ -83,7 +69,7 @@ public class BaseTestRegionClient {
   protected SecureRpcHelper secure_rpc_helper;
   protected FakeTimer timer;
   protected RegionClient region_client;
-  
+
   @Before
   public void before() throws Exception {
     config = new Config();
@@ -93,17 +79,18 @@ public class BaseTestRegionClient {
     when(hbase_client.getTimer()).thenReturn(timer);
     when(hbase_client.getRpcTimeoutTimer()).thenReturn(timer);
     when(hbase_client.getDefaultRpcTimeout()).thenReturn(60000);
-    
+
     chan = mock(Channel.class, Mockito.RETURNS_DEEP_STUBS);
     ctx = mock(ChannelHandlerContext.class);
     cse = mock(ChannelStateEvent.class);
     secure_rpc_helper = mock(SecureRpcHelper.class);
-    
+
     when(ctx.getChannel()).thenReturn(chan);
     final HeapChannelBufferFactory factory = new HeapChannelBufferFactory();
     when(chan.getConfig().getBufferFactory()).thenReturn(factory);
-    
-    PowerMockito.doAnswer(new Answer<RegionClient>(){
+
+    // PowerMock private method stubbing is not supported by Mockito. Refactor the private method to package-private or extract to a collaborator.
+    Mockito.doAnswer(new Answer<RegionClient>(){
       @Override
       public RegionClient answer(InvocationOnMock invocation) throws Throwable {
         final Object[] args = invocation.getArguments();
@@ -113,20 +100,25 @@ public class BaseTestRegionClient {
         return rc;
       }
     }).when(hbase_client, "newClient", anyString(), anyInt());
-    
-    region_client = PowerMockito.spy(new RegionClient(hbase_client, null, "localhost"));
-    Whitebox.setInternalState(region_client, "chan", chan);
-    Whitebox.setInternalState(region_client, "server_version", 
-        RegionClient.SERVER_VERSION_095_OR_ABOVE);
+
+    region_client = Mockito.spy(new RegionClient(hbase_client, null, "localhost"));
+    Field chanField = region_client.getClass().getDeclaredField("chan");
+    chanField.setAccessible(true);
+    chanField.set(region_client, chan);
+    Field server_versionField = region_client.getClass().getDeclaredField("server_version");
+    server_versionField.setAccessible(true);
+    server_versionField.set(region_client, RegionClient.SERVER_VERSION_095_OR_ABOVE);
     rpcs_inflight = Whitebox.getInternalState(region_client, "rpcs_inflight");
   }
-  
+
   /**
    * Injects the security helper mock in the class. The default is to operate
    * without security.
    */
-  protected void injectSecurity() {
-    Whitebox.setInternalState(region_client, "secure_rpc_helper", secure_rpc_helper);
+  protected void injectSecurity() throws Exception {
+    Field secure_rpc_helperField = region_client.getClass().getDeclaredField("secure_rpc_helper");
+    secure_rpc_helperField.setAccessible(true);
+    secure_rpc_helperField.set(region_client, secure_rpc_helper);
 
     when(secure_rpc_helper
         .handleResponse(any(ChannelBuffer.class), any(Channel.class)))
@@ -136,7 +128,7 @@ public class BaseTestRegionClient {
               throws Throwable {
             return (ChannelBuffer)args.getArguments()[0];
           }
-    });
+        });
   }
   
   // Helpers //

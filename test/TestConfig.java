@@ -26,25 +26,17 @@
  */
 package org.hbase.async;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.mockito.Mockito.mock;
+import static org.junit.Assert.*;
 
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.util.Properties;
 
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest({ Config.class })
+import org.junit.Test;
+
+import org.mockito.Mockito;
+
 public class TestConfig {
 
   @Test
@@ -86,16 +78,17 @@ public class TestConfig {
 
   @Test
   public void constructorWithFile() throws Exception {
-    PowerMockito.whenNew(FileInputStream.class).withAnyArguments()
-      .thenReturn(mock(FileInputStream.class));
-    final Properties props = new Properties();
-    props.setProperty("asynchbase.test", "val1");
-    PowerMockito.whenNew(Properties.class).withNoArguments().thenReturn(props);
-    
-    final Config config = new Config("/tmp/config.file");
-    assertNotNull(config);
-    assertEquals("/tmp/config.file", config.config_location);
-    assertEquals("val1", config.getString("asynchbase.test"));
+    try (MockedConstruction<Properties> mockProperties = Mockito.mockConstruction(Properties.class)) {
+      try (MockedConstruction<FileInputStream> mockFileInputStream = Mockito.mockConstruction(FileInputStream.class)) {
+        final Properties props = new Properties();
+        props.setProperty("asynchbase.test", "val1");
+
+        final Config config = new Config("/tmp/config.file");
+        assertNotNull(config);
+        assertEquals("/tmp/config.file", config.config_location);
+        assertEquals("val1", config.getString("asynchbase.test"));
+      }
+    }
   }
 
   @Test(expected = FileNotFoundException.class)

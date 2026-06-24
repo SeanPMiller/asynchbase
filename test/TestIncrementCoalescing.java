@@ -26,13 +26,15 @@
  */
 package org.hbase.async;
 
+import java.util.ArrayList;
+import java.util.Random;
+
+
 import com.google.common.cache.CacheStats;
-import com.stumbleupon.async.Callback;
 import org.junit.Ignore;
 import org.slf4j.Logger;
 
-import java.util.ArrayList;
-import java.util.Random;
+import com.stumbleupon.async.Callback;
 
 /**
  * Integration test for increment coalescing.

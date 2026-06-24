@@ -26,13 +26,14 @@
  */
 package org.hbase.async;
 
-import com.google.common.base.Joiner;
-import org.junit.Ignore;
-import org.slf4j.Logger;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
+
+
+import com.google.common.base.Joiner;
+import org.junit.Ignore;
+import org.slf4j.Logger;
 
 /**
  * Simple command-line interface to quickly test async HBase.

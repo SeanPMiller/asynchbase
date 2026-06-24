@@ -26,20 +26,15 @@
  */
 package org.hbase.async;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyInt;
+import static org.junit.Assert.*;
+
 import static org.mockito.Mockito.when;
 
 import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
-
 import javax.security.auth.Subject;
 import javax.security.sasl.SaslException;
+
 
 import org.hbase.async.auth.KerberosClientAuthProvider;
 import org.hbase.async.auth.MockProvider;
@@ -47,9 +42,10 @@ import org.hbase.async.auth.SimpleClientAuthProvider;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.junit.Test;
+
+import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-import org.powermock.api.mockito.PowerMockito;
 
 public class TestSecureRpcHelper extends BaseTestSecureRpcHelper {
   
@@ -215,7 +211,7 @@ public class TestSecureRpcHelper extends BaseTestSecureRpcHelper {
     setupChallenge();
     final byte[] challenge = { 42 };
     
-    PowerMockito.doAnswer(new Answer<byte[]>() {
+    Mockito.doAnswer(new Answer<byte[]>() {
       @Override
       public byte[] answer(InvocationOnMock invocation) throws Throwable {
         return challenge;
@@ -256,8 +252,8 @@ public class TestSecureRpcHelper extends BaseTestSecureRpcHelper {
   @Test (expected = IllegalStateException.class)
   public void processChallengePrivilegedActionException() throws Exception {
     final byte[] challenge = { 42 };
-    PowerMockito.mockStatic(Subject.class);
-    PowerMockito.doThrow(new PrivilegedActionException(
+    Mockito.mockStatic(Subject.class);
+    Mockito.doThrow(new PrivilegedActionException(
         new RuntimeException("Boo!"))).when(Subject.class);
     Subject.doAs(any(Subject.class), any(PrivilegedExceptionAction.class));
 
@@ -271,8 +267,8 @@ public class TestSecureRpcHelper extends BaseTestSecureRpcHelper {
   @Test (expected = RuntimeException.class)
   public void processChallengeRuntimeException() throws Exception {
     final byte[] challenge = { 42 };
-    PowerMockito.mockStatic(Subject.class);
-    PowerMockito.doThrow(new RuntimeException("Boo!")).when(Subject.class);
+    Mockito.mockStatic(Subject.class);
+    Mockito.doThrow(new RuntimeException("Boo!")).when(Subject.class);
     Subject.doAs(any(Subject.class), any(PrivilegedExceptionAction.class));
     
     config.overrideConfig(SecureRpcHelper.SECURITY_AUTHENTICATION_KEY, 

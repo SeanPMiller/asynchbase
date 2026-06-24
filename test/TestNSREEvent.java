@@ -26,11 +26,11 @@
  */
 package org.hbase.async;
 
-import com.google.common.testing.EqualsTester;
-
-import org.junit.Test;
-
 import static org.junit.Assert.assertEquals;
+
+
+import com.google.common.testing.EqualsTester;
+import org.junit.Test;
 
 public class TestNSREEvent {
   final static byte[] TABLE = new byte[] { 't' };

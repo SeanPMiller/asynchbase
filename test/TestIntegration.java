@@ -26,21 +26,22 @@
  */
 package org.hbase.async;
 
-import java.lang.Exception;
+import static org.junit.Assert.*;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.lang.Exception;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
-import org.slf4j.Logger;
-import com.stumbleupon.async.Callback;
-import com.stumbleupon.async.Deferred;
-import com.stumbleupon.async.DeferredGroupException;
+
 import org.hbase.async.CompareFilter.CompareOp;
 import org.junit.After;
 import org.junit.Before;
@@ -51,11 +52,11 @@ import org.junit.runner.Request;
 import org.junit.runner.Result;
 import org.junit.runner.notification.Failure;
 import org.junit.runner.notification.RunListener;
-import org.powermock.reflect.Whitebox;
+import org.slf4j.Logger;
 
-import java.util.Map;
-
-import static org.junit.Assert.*;
+import com.stumbleupon.async.Callback;
+import com.stumbleupon.async.Deferred;
+import com.stumbleupon.async.DeferredGroupException;
 
 /**
  * Basic integration and regression tests for asynchbase.
@@ -1536,9 +1537,9 @@ final public class TestIntegration {
     // region cache to demonstrate it is filled.
     client.prefetchMeta(table).join();
 
-    Object region_info = Whitebox.invokeMethod(client, "getRegion",
-                                               table.getBytes(),
-                                               HBaseClient.EMPTY_ARRAY);
+    Method getRegionMethod = client.getClass().getDeclaredMethod("getRegion", table.getBytes().getClass(), HBaseClient.EMPTY_ARRAY.getClass());
+    getRegionMethod.setAccessible(true);
+    Object region_info = getRegionMethod.invoke(client, table.getBytes(), HBaseClient.EMPTY_ARRAY);
     assertNotNull(region_info);
   }
 

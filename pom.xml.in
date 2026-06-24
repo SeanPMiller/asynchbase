@@ -59,14 +59,28 @@
     <sourceDirectory>.mvn-compat/src/main/java</sourceDirectory>
     <testSourceDirectory>test</testSourceDirectory>
 
+    <!-- Detects the OS/arch and exposes ${os.detected.classifier} (e.g.
+         osx-aarch_64, osx-x86_64, linux-x86_64, windows-x86_64) so the
+         protobuf plugin can download a matching protoc binary. -->
+    <extensions>
+      <extension>
+        <groupId>kr.motd.maven</groupId>
+        <artifactId>os-maven-plugin</artifactId>
+        <version>1.7.1</version>
+      </extension>
+    </extensions>
+
     <plugins>
 
       <plugin>
         <groupId>org.xolstice.maven.plugins</groupId>
         <artifactId>protobuf-maven-plugin</artifactId>
-        <version>0.5.0</version>
+        <version>0.6.1</version>
         <configuration>
-          <protocExecutable>protoc</protocExecutable>
+          <!-- Download protoc @PROTOBUF_VERSION@ from Maven Central instead of requiring
+               a local 'protoc' on the PATH.  Works on macOS (Intel/Apple
+               Silicon), Linux and Windows. -->
+          <protocArtifact>com.google.protobuf:protoc:@PROTOBUF_VERSION@:exe:${os.detected.classifier}</protocArtifact>
           <protoSourceRoot>${basedir}/protobuf</protoSourceRoot>
         </configuration>
         <executions>
@@ -81,10 +95,13 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
-        <version>2.5.1</version>
+        <version>3.12.1</version>
         <configuration>
-          <source>1.6</source>
-          <target>1.6</target>
+          <!-- source/target 1.8 (rather than the JDK9+ only <release>) so the
+               project can be built with any JDK from 8 through 17+ and the
+               produced bytecode runs on Java 8 and later. -->
+          <source>1.8</source>
+          <target>1.8</target>
           <compilerArgument>-Xlint</compilerArgument>
         </configuration>
       </plugin>
@@ -164,6 +181,25 @@
         </configuration>
       </plugin>
 
+      <plugin>
+        <groupId>org.openrewrite.maven</groupId>
+        <artifactId>rewrite-maven-plugin</artifactId>
+        <version>6.41.0</version>
+        <configuration>
+          <exportDatatables>true</exportDatatables>
+          <activeRecipes>
+            <recipe>org.openrewrite.java.OrderImports</recipe>
+            <recipe>org.openrewrite.java.testing.mockito.Mockito1to3Migration</recipe>
+          </activeRecipes>
+        </configuration>
+        <dependencies>
+          <dependency>
+            <groupId>org.openrewrite.recipe</groupId>
+            <artifactId>rewrite-testing-frameworks</artifactId>
+            <version>3.37.0</version>
+          </dependency>
+        </dependencies>
+      </plugin>
     </plugins>
   </build>
   

@@ -26,16 +26,22 @@
  */
 package org.hbase.async;
 
-import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.*;
 
+import static org.mockito.Mockito.*;
+import static org.powermock.api.mockito.PowerMockito.verifyPrivate;
+import static org.powermock.api.mockito.PowerMockito.whenNew;
+
+import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 
+
+import org.apache.zookeeper.KeeperException.Code;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
-import org.apache.zookeeper.KeeperException.Code;
 import org.apache.zookeeper.Watcher.Event.KeeperState;
 import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.data.Stat;
@@ -46,45 +52,16 @@ import org.hbase.async.generated.ZooKeeperPB.MetaRegionServer;
 import org.jboss.netty.util.TimerTask;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-
+import org.mockito.MockedConstruction;
 import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
-import static org.mockito.Mockito.any;
-import static org.mockito.Mockito.anyInt;
-import static org.mockito.Mockito.anyLong;
-import static org.mockito.Mockito.anyString;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.never;
-import static org.powermock.api.mockito.PowerMockito.mock;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
-import static org.powermock.api.mockito.PowerMockito.whenNew;
-import static org.powermock.api.mockito.PowerMockito.verifyPrivate;
-
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
 import org.powermock.reflect.Whitebox;
 
 import com.stumbleupon.async.Deferred;
 
-@RunWith(PowerMockRunner.class)
-//"Classloader hell"...  It's real.  Tell PowerMock to ignore these classes
-//because they fiddle with the class loader.  We don't test them anyway.
-@PowerMockIgnore({"javax.management.*", "javax.xml.*",
-             "ch.qos.*", "org.slf4j.*",
-             "com.sum.*", "org.xml.*"})
-@PrepareForTest({ HBaseClient.class, RegionClient.class, ZKClient.class, ZooKeeper.class })
 public class TestZKClient {
   private final static String quorum = "localhost:2121";
   private final static String base_path = "/hbase";
@@ -95,25 +72,29 @@ public class TestZKClient {
   private ZKClient zk_client;
   private ZooKeeper zk = mock(ZooKeeper.class);
   private ArrayList<Deferred<Object>> deferred_rootregion;
-  
+
   @Before
   public void before() throws Exception {
-    client = mock(HBaseClient.class);
-    config = new Config();
-    Whitebox.setInternalState(client, "config", config);
-    zk_client = PowerMockito.spy(client.new ZKClient(quorum, base_path));
-    whenNew(ZooKeeper.class).withAnyArguments().thenReturn(zk);
+    try (MockedConstruction<ZooKeeper> mockZooKeeper = Mockito.mockConstruction(ZooKeeper.class)) {
+      client = mock(HBaseClient.class);
+      config = new Config();
+      Field configField = client.getClass().getDeclaredField("config");
+      configField.setAccessible(true);
+      configField.set(client, config);
+      zk_client = Mockito.spy(client.new ZKClient(quorum, base_path));
 
-    PowerMockito.doAnswer(new Answer<RegionClient>(){
-      @Override
-      public RegionClient answer(InvocationOnMock invocation) throws Throwable {
-        final Object[] args = invocation.getArguments();
-        final String endpoint = (String)args[0] + ":" + (Integer)args[1];
-        final RegionClient rc = mock(RegionClient.class);
-        when(rc.getRemoteAddress()).thenReturn(endpoint);
-        return rc;
-      }
-    }).when(client, "newClient", anyString(), anyInt());
+      // PowerMock private method stubbing is not supported by Mockito. Refactor the private method to package-private or extract to a collaborator.
+      Mockito.doAnswer(new Answer<RegionClient>(){
+        @Override
+        public RegionClient answer(InvocationOnMock invocation) throws Throwable {
+          final Object[] args = invocation.getArguments();
+          final String endpoint = (String)args[0] + ":" + (Integer)args[1];
+          final RegionClient rc = mock(RegionClient.class);
+          when(rc.getRemoteAddress()).thenReturn(endpoint);
+          return rc;
+        }
+      }).when(client, "newClient", anyString(), anyInt());
+    }
   }
   
   @Test
@@ -152,13 +133,15 @@ public class TestZKClient {
     assertEquals(1, deferred_rootregion.size());
     verifyPrivate(zk_client).invoke("connectZK");
   }
-  
+
   @Test
   public void getDeferredRootAdd() throws Exception {
     deferred_rootregion = new ArrayList<Deferred<Object>>(2);
     deferred_rootregion.add(new Deferred<Object>());
-    Whitebox.setInternalState(zk_client, "deferred_rootregion", deferred_rootregion);
-    
+    Field deferred_rootregionField = zk_client.getClass().getDeclaredField("deferred_rootregion");
+    deferred_rootregionField.setAccessible(true);
+    deferred_rootregionField.set(zk_client, deferred_rootregion);
+
     final Deferred<Object> root = zk_client.getDeferredRoot();
     assertNotNull(root);
     assertNotNull(deferred_rootregion);
@@ -171,13 +154,15 @@ public class TestZKClient {
     assertNull(zk_client.getDeferredRootIfBeingLookedUp());
     verifyPrivate(zk_client, never()).invoke("connectZK");
   }
-  
+
   @Test
   public void getDeferredRootIfBeingLookedUp() throws Exception {
     deferred_rootregion = new ArrayList<Deferred<Object>>(2);
     deferred_rootregion.add(new Deferred<Object>());
-    Whitebox.setInternalState(zk_client, "deferred_rootregion", deferred_rootregion);
-    
+    Field deferred_rootregionField = zk_client.getClass().getDeclaredField("deferred_rootregion");
+    deferred_rootregionField.setAccessible(true);
+    deferred_rootregionField.set(zk_client, deferred_rootregion);
+
     final Deferred<Object> root = zk_client.getDeferredRootIfBeingLookedUp();
     assertNotNull(root);
     assertNotNull(deferred_rootregion);
@@ -192,12 +177,12 @@ public class TestZKClient {
         new UnknownHostException("Bad Quorum"));
     zk_client.getDeferredRoot().joinUninterruptibly();
   }
-  
+
   /**
    * WARNING: This will cause an infinite loop until we fix it. There's a TODO
    * in the code for it.
    */
-//  @Test
+  //  @Test
 //  public void connectZKIOEInfinitLoop() throws Exception {
 //    whenNew(ZooKeeper.class).withAnyArguments().thenThrow(
 //        new IOException("Bad Quorum"));
@@ -206,28 +191,33 @@ public class TestZKClient {
   
   @Test
   public void process() throws Exception {
-    final WatchedEvent event = mock(WatchedEvent.class);
-    when(event.getState()).thenReturn(KeeperState.SyncConnected);
-    final ZKCallback cb = zk_client.new ZKCallback();
-    whenNew(ZKCallback.class).withNoArguments().thenReturn(cb);
-    Whitebox.setInternalState(zk_client, "zk", zk);
-    
-    zk_client.process(event);
-    verifyPrivate(zk_client).invoke("getRootRegion");
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
-    verify(zk).getData("/hbase/root-region-server", zk_client, cb, null);
-    verify(zk).getData("/hbase/meta-region-server", zk_client, cb, null);
+    try (MockedConstruction<ZKCallback> mockZKCallback = Mockito.mockConstruction(ZKCallback.class)) {
+      final WatchedEvent event = mock(WatchedEvent.class);
+      when(event.getState()).thenReturn(KeeperState.SyncConnected);
+      final ZKCallback cb = zk_client.new ZKCallback();
+      Field zkField = zk_client.getClass().getDeclaredField("zk");
+      zkField.setAccessible(true);
+      zkField.set(zk_client, zk);
+
+      zk_client.process(event);
+      verifyPrivate(zk_client).invoke("getRootRegion");
+      verifyPrivate(zk_client, never()).invoke("connectZK");
+      verifyPrivate(zk_client, never()).invoke("disconnectZK");
+      verify(zk).getData("/hbase/root-region-server", zk_client, cb, null);
+      verify(zk).getData("/hbase/meta-region-server", zk_client, cb, null);
+    }
   }
-  
+
   @Test
   public void processDefault() throws Exception {
     final WatchedEvent event = mock(WatchedEvent.class);
     when(event.getState()).thenReturn(KeeperState.AuthFailed);
     deferred_rootregion = new ArrayList<Deferred<Object>>(2);
     deferred_rootregion.add(new Deferred<Object>());
-    Whitebox.setInternalState(zk_client, "deferred_rootregion", deferred_rootregion);
-    
+    Field deferred_rootregionField = zk_client.getClass().getDeclaredField("deferred_rootregion");
+    deferred_rootregionField.setAccessible(true);
+    deferred_rootregionField.set(zk_client, deferred_rootregion);
+
     zk_client.process(event);
     verifyPrivate(zk_client, never()).invoke("getRootRegion");
     verifyPrivate(zk_client).invoke("connectZK"); // null rootregion
@@ -291,10 +281,12 @@ public class TestZKClient {
     verify(zk).close();
     assertNotNull(Whitebox.getInternalState(zk_client, "zk"));
   }
-  
+
   @Test
   public void disconnectZKNullZK() throws Exception {
-    Whitebox.setInternalState(zk_client, "zk", (Object)null);
+    Field zkField = zk_client.getClass().getDeclaredField("zk");
+    zkField.setAccessible(true);
+    zkField.set(zk_client, (Object)null);
     zk_client.disconnectZK();
     verify(zk, never()).close();
   }
@@ -461,39 +453,43 @@ public class TestZKClient {
     assertEquals(Byte.valueOf("0"), 
         (Byte)Whitebox.getInternalState(cb, "found_meta"));
   }
-  
+
   @Test
   public void processResultNoNodeRootMetaFound() throws Exception {
     final ZKCallback cb = zk_client.new ZKCallback();
-    Whitebox.setInternalState(cb, "found_meta", (byte)1);
+    Field found_metaField = cb.getClass().getDeclaredField("found_meta");
+    found_metaField.setAccessible(true);
+    found_metaField.set(cb, (byte)1);
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
-    cb.processResult(Code.NONODE.intValue(), "/hbase/root-region-server", null, 
+    cb.processResult(Code.NONODE.intValue(), "/hbase/root-region-server", null,
         data, stat);
     verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
     verifyPrivate(zk_client, never()).invoke("connectZK");
     verifyPrivate(zk_client, never()).invoke("disconnectZK");
     verifyPrivate(zk_client, never()).invoke("retryGetRootRegionLater");
-    assertEquals(Byte.valueOf("2"), 
+    assertEquals(Byte.valueOf("2"),
         (Byte)Whitebox.getInternalState(cb, "found_root"));
-    assertEquals(Byte.valueOf("1"), 
+    assertEquals(Byte.valueOf("1"),
         (Byte)Whitebox.getInternalState(cb, "found_meta"));
   }
-  
+
   @Test
   public void processResultNoNodeRootMetaNotFound() throws Exception {
     final ZKCallback cb = zk_client.new ZKCallback();
-    Whitebox.setInternalState(cb, "found_meta", (byte)2);
+    Field found_metaField = cb.getClass().getDeclaredField("found_meta");
+    found_metaField.setAccessible(true);
+    found_metaField.set(cb, (byte)2);
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
-    cb.processResult(Code.NONODE.intValue(), "/hbase/root-region-server", null, 
+    cb.processResult(Code.NONODE.intValue(), "/hbase/root-region-server", null,
         data, stat);
     verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
     verifyPrivate(zk_client, never()).invoke("connectZK");
     verifyPrivate(zk_client, never()).invoke("disconnectZK");
     verifyPrivate(zk_client).invoke("retryGetRootRegionLater");
     verify(client).newTimeout((TimerTask)any(), anyLong());
-    assertEquals(Byte.valueOf("2"), 
+    assertEquals(Byte.valueOf("2"),
         (Byte)Whitebox.getInternalState(cb, "found_root"));
-    assertEquals(Byte.valueOf("2"), 
+    assertEquals(Byte.valueOf("2"),
         (Byte)Whitebox.getInternalState(cb, "found_meta"));
   }
   
@@ -512,39 +508,43 @@ public class TestZKClient {
     assertEquals(Byte.valueOf("2"), 
         (Byte)Whitebox.getInternalState(cb, "found_meta"));
   }
-  
+
   @Test
   public void processResultNoNodeMetaRootFound() throws Exception {
     final ZKCallback cb = zk_client.new ZKCallback();
-    Whitebox.setInternalState(cb, "found_root", (byte)1);
+    Field found_rootField = cb.getClass().getDeclaredField("found_root");
+    found_rootField.setAccessible(true);
+    found_rootField.set(cb, (byte)1);
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
-    cb.processResult(Code.NONODE.intValue(), "/hbase/meta-region-server", null, 
+    cb.processResult(Code.NONODE.intValue(), "/hbase/meta-region-server", null,
         data, stat);
     verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
     verifyPrivate(zk_client, never()).invoke("connectZK");
     verifyPrivate(zk_client, never()).invoke("disconnectZK");
     verifyPrivate(zk_client, never()).invoke("retryGetRootRegionLater");
-    assertEquals(Byte.valueOf("1"), 
+    assertEquals(Byte.valueOf("1"),
         (Byte)Whitebox.getInternalState(cb, "found_root"));
-    assertEquals(Byte.valueOf("2"), 
+    assertEquals(Byte.valueOf("2"),
         (Byte)Whitebox.getInternalState(cb, "found_meta"));
   }
-  
+
   @Test
   public void processResultNoNodeMetaRootNotFound() throws Exception {
     final ZKCallback cb = zk_client.new ZKCallback();
-    Whitebox.setInternalState(cb, "found_root", (byte)2);
+    Field found_rootField = cb.getClass().getDeclaredField("found_root");
+    found_rootField.setAccessible(true);
+    found_rootField.set(cb, (byte)2);
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
-    cb.processResult(Code.NONODE.intValue(), "/hbase/meta-region-server", null, 
+    cb.processResult(Code.NONODE.intValue(), "/hbase/meta-region-server", null,
         data, stat);
     verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
     verifyPrivate(zk_client, never()).invoke("connectZK");
     verifyPrivate(zk_client, never()).invoke("disconnectZK");
     verifyPrivate(zk_client).invoke("retryGetRootRegionLater");
     verify(client).newTimeout((TimerTask)any(), anyLong());
-    assertEquals(Byte.valueOf("2"), 
+    assertEquals(Byte.valueOf("2"),
         (Byte)Whitebox.getInternalState(cb, "found_root"));
-    assertEquals(Byte.valueOf("2"), 
+    assertEquals(Byte.valueOf("2"),
         (Byte)Whitebox.getInternalState(cb, "found_meta"));
   }
   
@@ -711,8 +711,7 @@ public class TestZKClient {
   public void handleRootZnode90Resolve() throws Exception {
     final InetAddress addr = mock(InetAddress.class);
     when(addr.getHostAddress()).thenReturn("192.168.1.1");
-    mockStatic(InetAddress.class);
-    PowerMockito.when(InetAddress.getByName("myzkhost")).thenReturn(addr);
+    Mockito.when(InetAddress.getByName("myzkhost")).thenReturn(addr);
     
     final ZKCallback cb = zk_client.new ZKCallback();
     final byte[] data = "myzkhost:50511".getBytes(CHARSET);
@@ -778,8 +777,7 @@ public class TestZKClient {
   public void handleRootZnode91Resolve() throws Exception {
     final InetAddress addr = mock(InetAddress.class);
     when(addr.getHostAddress()).thenReturn("192.168.1.1");
-    mockStatic(InetAddress.class);
-    PowerMockito.when(InetAddress.getByName("myzkhost")).thenReturn(addr);
+    Mockito.when(InetAddress.getByName("myzkhost")).thenReturn(addr);
     
     final ZKCallback cb = zk_client.new ZKCallback();
     final byte[] data = "myzkhost,50511,1388534400000".getBytes(CHARSET);
@@ -798,8 +796,7 @@ public class TestZKClient {
   
   @Test (expected = NumberFormatException.class)
   public void handleRootZnode91NoHost() throws Exception {
-    mockStatic(InetAddress.class);
-    PowerMockito.when(InetAddress.getByName("50511"))
+    Mockito.when(InetAddress.getByName("50511"))
       .thenThrow(new UnknownHostException("No such host 50511"));
     
     final ZKCallback cb = zk_client.new ZKCallback();
@@ -957,8 +954,7 @@ public class TestZKClient {
   
   @Test (expected = NumberFormatException.class)
   public void handleRootZnode92NoHost() throws Exception {
-    mockStatic(InetAddress.class);
-    PowerMockito.when(InetAddress.getByName("50511"))
+    Mockito.when(InetAddress.getByName("50511"))
       .thenThrow(new UnknownHostException("No such host 50511"));
     
     final ZKCallback cb = zk_client.new ZKCallback();
@@ -988,8 +984,7 @@ public class TestZKClient {
   
   @Test
   public void handleRootZnodeUnknownHost() throws Exception {
-    mockStatic(InetAddress.class);
-    PowerMockito.when(InetAddress.getByName("myzkhost"))
+    Mockito.when(InetAddress.getByName("myzkhost"))
       .thenThrow(new UnknownHostException("No such host myzkhost"));
     
     final ZKCallback cb = zk_client.new ZKCallback();
@@ -999,8 +994,7 @@ public class TestZKClient {
   
   @Test (expected = RuntimeException.class)
   public void handleRootZnodeResolveException() throws Exception {
-    mockStatic(InetAddress.class);
-    PowerMockito.when(InetAddress.getByName("myzkhost"))
+    Mockito.when(InetAddress.getByName("myzkhost"))
       .thenThrow(new RuntimeException("Pear shaped"));
     
     final ZKCallback cb = zk_client.new ZKCallback();
@@ -1035,7 +1029,7 @@ public class TestZKClient {
     verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
     assertFalse(client.has_root);
   }
-  
+
 
   @Test
   public void handleMetaZnodeSplitMeta() throws Exception {
@@ -1064,8 +1058,7 @@ public class TestZKClient {
   public void handleMetaZnodeResolve() throws Exception {
     final InetAddress addr = mock(InetAddress.class);
     when(addr.getHostAddress()).thenReturn("192.168.1.1");
-    mockStatic(InetAddress.class);
-    PowerMockito.when(InetAddress.getByName("myzkhost")).thenReturn(addr);
+    Mockito.when(InetAddress.getByName("myzkhost")).thenReturn(addr);
     
     final ZKCallback cb = zk_client.new ZKCallback();
 

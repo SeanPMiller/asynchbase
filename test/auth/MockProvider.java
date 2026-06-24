@@ -27,9 +27,9 @@
 package org.hbase.async.auth;
 
 import java.util.Map;
-
 import javax.security.auth.Subject;
 import javax.security.sasl.SaslClient;
+
 
 import org.hbase.async.HBaseClient;
 import org.junit.Ignore;

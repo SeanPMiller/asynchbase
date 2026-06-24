@@ -26,6 +26,8 @@
  */
 package com.google.protobuf;  // This is a lie.
 
+import java.lang.reflect.Field;
+
 /**
  * Helper class to extract byte arrays from {@link ByteString} without copy.
  * <p>
@@ -37,32 +39,85 @@ package com.google.protobuf;  // This is a lie.
  * <strong>This class isn't part of the public API of AsyncHBase.</strong>
  * @since 1.5
  */
-public final class ZeroCopyLiteralByteString extends LiteralByteString {
+public final class ZeroCopyLiteralByteString {
+
+  /**
+   * The package-private {@code com.google.protobuf.ByteString$LiteralByteString}
+   * class, or {@code null} if it can't be located (e.g. a future protobuf that
+   * renames it).
+   */
+  private static final Class<?> LITERAL_BYTE_STRING_CLASS =
+      findLiteralByteStringClass();
+
+  /**
+   * The {@code byte[] bytes} backing field of {@code LiteralByteString}, made
+   * accessible, or {@code null} if reflection is unavailable.
+   */
+  private static final Field BYTES_FIELD =
+      findBytesField(LITERAL_BYTE_STRING_CLASS);
 
   /** Private constructor so this class cannot be instantiated. */
   private ZeroCopyLiteralByteString() {
-    super(null);
     throw new UnsupportedOperationException("Should never be here.");
   }
 
   /**
    * Wraps a byte array in a {@link ByteString} without copying it.
+   * <p>
+   * Uses the public {@link UnsafeByteOperations#unsafeWrap(byte[])} API
+   * (protobuf 3.x), which performs a true zero-copy wrap.
+   * @param array A byte array that must be considered read-only from there on.
    */
   public static ByteString wrap(final byte[] array) {
-    return new LiteralByteString(array);
+    return UnsafeByteOperations.unsafeWrap(array);
   }
 
   /**
-   * Extracts the byte array from the given {@link ByteString} without copy.
-   * @param buf A buffer from which to extract the array.  This buffer must be
-   * actually an instance of a {@code LiteralByteString}.
+   * Extracts the byte array backing the given {@link ByteString} without a copy
+   * when possible.
+   * <p>
+   * As of protobuf 3.x {@code LiteralByteString} is a private nested class with
+   * no public accessor for its backing array, so we read it reflectively.  If
+   * that isn't possible (reflection blocked, unexpected {@link ByteString}
+   * subtype such as a rope/bounded/NIO-backed one, or a future protobuf
+   * layout), we fall back to a safe defensive copy via
+   * {@link ByteString#toByteArray()}.  This keeps the call correct on every JDK
+   * from 8 through 17+.
+   * @param buf A buffer from which to extract the array.
    */
   public static byte[] zeroCopyGetBytes(final ByteString buf) {
-    if (buf instanceof LiteralByteString) {
-      return ((LiteralByteString) buf).bytes;
+    // Only an exact LiteralByteString backs its content 1:1 with its array;
+    // subtypes (BoundedByteString, RopeByteString, ...) do not, so copy those.
+    if (BYTES_FIELD != null && buf.getClass() == LITERAL_BYTE_STRING_CLASS) {
+      try {
+        return (byte[]) BYTES_FIELD.get(buf);
+      } catch (IllegalAccessException e) {
+        // Fall through to the safe copy below.
+      }
     }
-    throw new UnsupportedOperationException("Need a LiteralByteString, got a "
-                                            + buf.getClass().getName());
+    return buf.toByteArray();
+  }
+
+  private static Class<?> findLiteralByteStringClass() {
+    try {
+      return Class.forName("com.google.protobuf.ByteString$LiteralByteString");
+    } catch (ClassNotFoundException e) {
+      return null;
+    }
+  }
+
+  private static Field findBytesField(final Class<?> klass) {
+    if (klass == null) {
+      return null;
+    }
+    try {
+      final Field f = klass.getDeclaredField("bytes");
+      f.setAccessible(true);
+      return f;
+    } catch (NoSuchFieldException | RuntimeException e) {
+      // RuntimeException covers JDK 9+ InaccessibleObjectException.
+      return null;
+    }
   }
 
 }

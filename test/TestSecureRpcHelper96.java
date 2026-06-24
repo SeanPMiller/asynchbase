@@ -26,56 +26,39 @@
  */
 package org.hbase.async;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-import static org.mockito.Matchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.junit.Assert.*;
+
+import static org.mockito.Mockito.*;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
-
-import javax.security.auth.Subject;
 import javax.security.sasl.Sasl;
 import javax.security.sasl.SaslClient;
 
+
+import com.google.protobuf.CodedOutputStream;
 import org.hbase.async.auth.ClientAuthProvider;
 import org.hbase.async.auth.KerberosClientAuthProvider;
-import org.hbase.async.auth.Login;
 import org.hbase.async.auth.SimpleClientAuthProvider;
 import org.hbase.async.generated.RPCPB;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.Channels;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
+
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
-import org.powermock.reflect.Whitebox;
 
-import com.google.protobuf.CodedOutputStream;
-
-@RunWith(PowerMockRunner.class)
-@PowerMockIgnore({"javax.management.*", "javax.xml.*",
-  "ch.qos.*", "org.slf4j.*",
-  "com.sum.*", "org.xml.*"})
-@PrepareForTest({ HBaseClient.class, Login.class, RegionClient.class,
-  SaslClient.class, KerberosClientAuthProvider.class, SecureRpcHelper.class,
-  Subject.class, Channel.class, Channels.class })
 public class TestSecureRpcHelper96 extends BaseTestSecureRpcHelper {
+
+  private MockedStatic<Channels> mockedChannels;
 
   private Channel channel;
   private List<ChannelBuffer> buffers;
@@ -83,6 +66,7 @@ public class TestSecureRpcHelper96 extends BaseTestSecureRpcHelper {
 
   @Before
   public void beforeLocal() throws Exception {
+    mockedChannels = Mockito.mockStatic(Channels.class);
     channel = mock(Channel.class);
 
     when(kerberos_provider.getAuthMethodCode())
@@ -90,9 +74,7 @@ public class TestSecureRpcHelper96 extends BaseTestSecureRpcHelper {
     when(kerberos_provider.getClientUsername()).thenReturn("Eskarina");
     
     when(sasl_client.hasInitialResponse()).thenReturn(true);
-    
-    PowerMockito.mockStatic(Channels.class);
-    PowerMockito.doAnswer(new Answer<Void>() {
+    Mockito.doAnswer(new Answer<Void>() {
       @Override
       public Void answer(final InvocationOnMock invocation) throws Throwable {
         if (buffers == null) {
@@ -108,6 +90,11 @@ public class TestSecureRpcHelper96 extends BaseTestSecureRpcHelper {
         "kerberos");
     helper = new SecureRpcHelper96(client, region_client, remote_endpoint);
   }
+
+  @After
+  public void tearDownStaticMocks() {
+    mockedChannels.closeOnDemand();
+  }
   
   @Test
   public void ctorKerberos() throws Exception {
@@ -117,7 +104,7 @@ public class TestSecureRpcHelper96 extends BaseTestSecureRpcHelper {
   
   @Test
   public void sendHello() throws Exception {
-    PowerMockito.doAnswer(new Answer<byte[]>() {
+    Mockito.doAnswer(new Answer<byte[]>() {
       @Override
       public byte[] answer(InvocationOnMock invocation) throws Throwable {
         return new byte[] { 42 };
@@ -134,7 +121,7 @@ public class TestSecureRpcHelper96 extends BaseTestSecureRpcHelper {
   @Test
   public void sendHelloNoInitialResponse() throws Exception {
     when(sasl_client.hasInitialResponse()).thenReturn(false);
-    PowerMockito.doAnswer(new Answer<byte[]>() {
+    Mockito.doAnswer(new Answer<byte[]>() {
       @Override
       public byte[] answer(InvocationOnMock invocation) throws Throwable {
         return new byte[] { 42 };
@@ -149,7 +136,7 @@ public class TestSecureRpcHelper96 extends BaseTestSecureRpcHelper {
   
   @Test
   public void sendHelloProcessException() throws Exception {
-    PowerMockito.doThrow(new IllegalStateException("Boo!"))
+    Mockito.doThrow(new IllegalStateException("Boo!"))
       .when(sasl_client).evaluateChallenge(any(byte[].class));
     RuntimeException ex = null;
     try {
@@ -304,18 +291,20 @@ public class TestSecureRpcHelper96 extends BaseTestSecureRpcHelper {
         RegionClient.SERVER_VERSION_095_OR_ABOVE);
     verify(sasl_client, never()).getNegotiatedProperty(Sasl.QOP);
   }
-  
+
   @Test
   public void handleResponseSaslCompleteWrapped() throws Exception {
     setupUnwrap();
-    
+
     final ChannelBuffer buf = ChannelBuffers.wrappedBuffer(wrapped_payload);
-    Whitebox.setInternalState(helper, "use_wrap", true);
+    Field use_wrapField = helper.getClass().getDeclaredField("use_wrap");
+    use_wrapField.setAccessible(true);
+    use_wrapField.set(helper, true);
     when(sasl_client.isComplete()).thenReturn(true);
     final ChannelBuffer unwrapped = helper.handleResponse(buf, channel);
     assertArrayEquals(unwrapped.array(), unwrapped_payload);
     assertNull(buffers);
-    verify(region_client, never()).becomeReady(channel, 
+    verify(region_client, never()).becomeReady(channel,
         RegionClient.SERVER_VERSION_095_OR_ABOVE);
     verify(sasl_client, never()).getNegotiatedProperty(Sasl.QOP);
   }
