@@ -72,19 +72,22 @@ public class TestSecureRpcHelper94 extends BaseTestSecureRpcHelper {
     when(kerberos_provider.getClientUsername()).thenReturn("Eskarina");
     
     when(sasl_client.hasInitialResponse()).thenReturn(true);
-    Mockito.doAnswer(new Answer<Void>() {
-      @Override
-      public Void answer(final InvocationOnMock invocation) throws Throwable {
-        if (buffers == null) {
-          buffers = new ArrayList<ChannelBuffer>(2);
+    mockedChannels.when(() -> Channels.write(any(Channel.class),
+        any(ChannelBuffer.class)))
+      .thenAnswer(new Answer<Void>() {
+        @Override
+        public Void answer(final InvocationOnMock invocation) throws Throwable {
+          if (buffers == null) {
+            buffers = new ArrayList<ChannelBuffer>(2);
+          }
+          buffers.add((ChannelBuffer)invocation.getArguments()[1]);
+          return null;
         }
-        buffers.add((ChannelBuffer)invocation.getArguments()[1]);
-        return null;
-      }
-    }).when(Channels.class);
-    Channels.write(any(Channel.class), any(ChannelBuffer.class));
-    
-    config.overrideConfig(SecureRpcHelper.SECURITY_AUTHENTICATION_KEY, 
+      });
+
+    setupChallenge();
+
+    config.overrideConfig(SecureRpcHelper.SECURITY_AUTHENTICATION_KEY,
         "kerberos");
     helper = new SecureRpcHelper94(client, region_client, remote_endpoint);
   }
@@ -317,7 +320,7 @@ public class TestSecureRpcHelper94 extends BaseTestSecureRpcHelper {
   public void handleResponseSaslCompleteWrapped() throws Exception {
     setupUnwrap();
     final ChannelBuffer buf = ChannelBuffers.wrappedBuffer(wrapped_payload);
-    Field use_wrapField = helper.getClass().getDeclaredField("use_wrap");
+    Field use_wrapField = helper.getClass().getSuperclass().getDeclaredField("use_wrap");
     use_wrapField.setAccessible(true);
     use_wrapField.set(helper, true);
     when(sasl_client.isComplete()).thenReturn(true);

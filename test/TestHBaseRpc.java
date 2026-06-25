@@ -54,9 +54,15 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
   public void beforeLocal() throws Exception {
     timer.stop();
     when(regionclient.getHBaseClient()).thenReturn(client);
-    Field rpc_timeoutField = client.getClass().getDeclaredField("rpc_timeout");
+    Field rpc_timeoutField = HBaseClient.class.getDeclaredField("rpc_timeout");
     rpc_timeoutField.setAccessible(true);
     rpc_timeoutField.set(client, 60000);
+    // Wire our FakeTimer into the client so enqueueTimeout() schedules onto it
+    // rather than the mocked HashedWheelTimer created in the base setup.
+    Field rpc_timeout_timerField =
+        HBaseClient.class.getDeclaredField("rpc_timeout_timer");
+    rpc_timeout_timerField.setAccessible(true);
+    rpc_timeout_timerField.set(client, timer);
     default_timeout = 60000;
   }
 
@@ -95,7 +101,7 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
     rpc = new GetRequest(TABLE, KEY, FAMILY);
     rpc.setIdAndClient(42, regionclient);
     final Timeout timeout_handle = mock(Timeout.class);
-    Field timeout_handleField = rpc.getClass().getDeclaredField("timeout_handle");
+    Field timeout_handleField = HBaseRpc.class.getDeclaredField("timeout_handle");
     timeout_handleField.setAccessible(true);
     timeout_handleField.set(rpc, timeout_handle);
     assertEquals(42, rpc.rpcId());
@@ -214,7 +220,7 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
   public void enqueueTimeoutAlreadyTimedout() throws Exception {
     final GetRequest rpc = new GetRequest(TABLE, KEY, FAMILY);
     rpc.setIdAndClient(1, regionclient);
-    Field has_timedoutField = rpc.getClass().getDeclaredField("has_timedout");
+    Field has_timedoutField = HBaseRpc.class.getDeclaredField("has_timedout");
     has_timedoutField.setAccessible(true);
     has_timedoutField.set(rpc, true);
     rpc.enqueueTimeout(regionclient);
@@ -252,12 +258,17 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
 
   @Test
   public void enqueueTimeoutTimerShuttingDown() throws Exception {
-    timer = mock(FakeTimer.class);
-    when(timer.newTimeout(any(TimerTask.class), anyLong(), any(TimeUnit.class)))
+    // Mock the base HashedWheelTimer type rather than FakeTimer: mocking the
+    // FakeTimer subclass with the inline maker instruments that class globally,
+    // which then makes the base setup's mockConstruction(HashedWheelTimer)
+    // intercept new FakeTimer() in subsequently-run tests (turning their timer
+    // into a no-op mock).  A plain HashedWheelTimer mock avoids that leakage.
+    final HashedWheelTimer shutdown_timer = mock(HashedWheelTimer.class);
+    when(shutdown_timer.newTimeout(any(TimerTask.class), anyLong(), any(TimeUnit.class)))
         .thenThrow(new IllegalStateException("Shutdown!"));
-    Field rpc_timeout_timerField = client.getClass().getDeclaredField("rpc_timeout_timer");
+    Field rpc_timeout_timerField = HBaseClient.class.getDeclaredField("rpc_timeout_timer");
     rpc_timeout_timerField.setAccessible(true);
-    rpc_timeout_timerField.set(client, timer);
+    rpc_timeout_timerField.set(client, shutdown_timer);
     final GetRequest rpc = new GetRequest(TABLE, KEY, FAMILY);
     final Deferred<Object> deferred = rpc.getDeferred();
     rpc.setIdAndClient(1, regionclient);
@@ -270,7 +281,7 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
     assertEquals(default_timeout, rpc.getTimeout());
     assertFalse(rpc.hasTimedOut());
     verify(regionclient, never()).removeRpc(any(HBaseRpc.class), anyBoolean());
-    verify(timer).newTimeout(any(TimerTask.class), anyLong(), any(TimeUnit.class));
+    verify(shutdown_timer).newTimeout(any(TimerTask.class), anyLong(), any(TimeUnit.class));
     try {
       deferred.join(1);
       fail("Expected a TimeoutException");
@@ -334,7 +345,7 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
     final Timeout timeout_handle = mock(Timeout.class);
     final Deferred<Object> deferred = rpc.getDeferred();
     final Object response = new Object();
-    Field timeout_handleField = rpc.getClass().getDeclaredField("timeout_handle");
+    Field timeout_handleField = HBaseRpc.class.getDeclaredField("timeout_handle");
     timeout_handleField.setAccessible(true);
     timeout_handleField.set(rpc, timeout_handle);
     assertTrue(rpc.hasDeferred());
@@ -366,7 +377,7 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
     rpc.attempt = 4;
     final Timeout timeout_handle = mock(Timeout.class);
     final Object response = new Object();
-    Field timeout_handleField = rpc.getClass().getDeclaredField("timeout_handle");
+    Field timeout_handleField = HBaseRpc.class.getDeclaredField("timeout_handle");
     timeout_handleField.setAccessible(true);
     timeout_handleField.set(rpc, timeout_handle);
     assertFalse(rpc.hasDeferred());
@@ -424,7 +435,7 @@ public class TestHBaseRpc extends BaseTestHBaseClient {
     final Deferred<Object> deferred = rpc.getDeferred();
     rpc.setIdAndClient(1, regionclient);
     rpc.enqueueTimeout(regionclient);
-    Field region_clientField = rpc.getClass().getDeclaredField("region_client");
+    Field region_clientField = HBaseRpc.class.getDeclaredField("region_client");
     region_clientField.setAccessible(true);
     region_clientField.set(rpc, (RegionClient)null);
     timer.tasks.get(0).getKey().run(rpc.timeoutHandle());

@@ -43,22 +43,27 @@ import org.hbase.async.ratelimiter.TestWriteRateLimiter.MockRateLimiter;
 import org.hbase.async.ratelimiter.WriteRateLimiter;
 import org.hbase.async.ratelimiter.WriteRateLimiter.SIGNAL;
 import org.jboss.netty.channel.Channels;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 import org.powermock.reflect.Whitebox;
 
 import com.stumbleupon.async.Deferred;
 
 public class TestRegionClientRateLimit extends BaseTestRegionClient {
   private static final byte[] QUALIFIER = { 's', 't', 'o' };
-  
+
   private List<SIGNAL> error_signals;
   private Random rnd;
   private MockRateLimiter guava_limiter;
   private WriteRateLimiter rate_limiter;
   private LimitPolicy policy;
   private FakeTaskTimer timer;
+  /** Static mock of RateLimiter held open for the duration of each test. */
+  private MockedStatic<RateLimiter> mockedRateLimiter;
 
   @Before
   public void beforeLocal() throws Exception {
@@ -67,10 +72,21 @@ public class TestRegionClientRateLimit extends BaseTestRegionClient {
     policy = new RateLimitPolicyImpl(80, 10);
     rate_limiter = new WriteRateLimiter(20, 10, 5, region_client, true,
         policy, timer, 60000);
-    guava_limiter = new MockRateLimiter();
-    Field rate_limiterField = region_client.getClass().getDeclaredField("rate_limiter");
+    // Open the static RateLimiter mock here (closed in @After) and let the
+    // MockRateLimiter helper register its create(double) stub onto it, so the
+    // production code receives the controllable mock limiter.
+    mockedRateLimiter = Mockito.mockStatic(RateLimiter.class);
+    guava_limiter = new MockRateLimiter(mockedRateLimiter);
+    Field rate_limiterField = RegionClient.class.getDeclaredField("rate_limiter");
     rate_limiterField.setAccessible(true);
     rate_limiterField.set(region_client, rate_limiter);
+  }
+
+  @After
+  public void afterLocal() {
+    if (mockedRateLimiter != null) {
+      mockedRateLimiter.close();
+    }
   }
   
   @Test
@@ -455,7 +471,7 @@ public class TestRegionClientRateLimit extends BaseTestRegionClient {
   public void failuresWithLimiterDisabled() throws Exception {
     rate_limiter = new WriteRateLimiter(20, 10, 5, region_client, false,
         policy, timer, 60000);
-    Field rate_limiterField = region_client.getClass().getDeclaredField("rate_limiter");
+    Field rate_limiterField = RegionClient.class.getDeclaredField("rate_limiter");
     rate_limiterField.setAccessible(true);
     rate_limiterField.set(region_client, rate_limiter);
 
@@ -1002,8 +1018,10 @@ public class TestRegionClientRateLimit extends BaseTestRegionClient {
     policy = new RateLimitPolicyImpl(80, 0);
     rate_limiter = new WriteRateLimiter(20, 10, 5, region_client, true,
         policy, timer, 60000);
-    guava_limiter = new MockRateLimiter();
-    Field rate_limiterField = region_client.getClass().getDeclaredField("rate_limiter");
+    // Re-register the create() stub onto the already-open static mock with a
+    // fresh helper (resets counters/rate) rather than opening a second one.
+    guava_limiter = new MockRateLimiter(mockedRateLimiter);
+    Field rate_limiterField = RegionClient.class.getDeclaredField("rate_limiter");
     rate_limiterField.setAccessible(true);
     rate_limiterField.set(region_client, rate_limiter);
 

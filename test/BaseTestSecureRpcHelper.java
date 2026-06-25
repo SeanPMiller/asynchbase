@@ -26,8 +26,7 @@
  */
 package org.hbase.async;
 
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
@@ -41,9 +40,8 @@ import org.hbase.async.auth.KerberosClientAuthProvider;
 import org.jboss.netty.buffer.ChannelBuffer;
 import org.jboss.netty.buffer.ChannelBuffers;
 import org.jboss.netty.channel.Channel;
+import org.junit.After;
 import org.junit.Before;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 
 import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
@@ -52,8 +50,9 @@ import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
 public class BaseTestSecureRpcHelper {
-  private MockedStatic<Subject> mockedSubject;
-  protected static byte[] unwrapped_payload = 
+  protected MockedStatic<Subject> mockedSubject;
+  private MockedConstruction<KerberosClientAuthProvider> mockedKerberosConstruction;
+  protected static byte[] unwrapped_payload =
     { 'p', 't', 'r', 'a', 'c', 'i' };
   protected static byte[] wrapped_payload = 
     { 0, 0, 0, 10, 0, 0, 0, 6, 'p', 't', 'r', 'a', 'c', 'i'};
@@ -68,20 +67,48 @@ public class BaseTestSecureRpcHelper {
   @SuppressWarnings("unchecked")
   @Before
   public void before() throws Exception {
-    try (MockedConstruction<KerberosClientAuthProvider> mockKerberosClientAuthProvider = Mockito.mockConstruction(KerberosClientAuthProvider.class)) {
-      config = new Config();
-      client = mock(HBaseClient.class);
-      region_client = mock(RegionClient.class);
-      remote_endpoint = new InetSocketAddress("127.0.0.1", 50512);
-      kerberos_provider = mock(KerberosClientAuthProvider.class);
-      sasl_client = mock(SaslClient.class);
+    mockedSubject = Mockito.mockStatic(Subject.class);
+    config = new Config();
+    client = mock(HBaseClient.class);
+    region_client = mock(RegionClient.class);
+    remote_endpoint = new InetSocketAddress("127.0.0.1", 50512);
+    kerberos_provider = mock(KerberosClientAuthProvider.class);
+    sasl_client = mock(SaslClient.class);
 
-      when(client.getConfig()).thenReturn(config);
-      when(kerberos_provider.newSaslClient(anyString(), anyMap()))
-          .thenReturn(sasl_client);
+    when(client.getConfig()).thenReturn(config);
+    when(kerberos_provider.newSaslClient(anyString(), anyMap()))
+        .thenReturn(sasl_client);
+
+    // The production code constructs a KerberosClientAuthProvider internally.
+    // Route every constructed instance's behavior through the kerberos_provider
+    // field mock so the existing stubs (newSaslClient, getAuthMethodCode,
+    // getClientUsername, getClientSubject) keep working.
+    mockedKerberosConstruction =
+        Mockito.mockConstruction(KerberosClientAuthProvider.class,
+            (m, ctx) -> {
+              when(m.newSaslClient(anyString(), anyMap()))
+                  .thenAnswer(invocation -> kerberos_provider.newSaslClient(
+                      (String) invocation.getArguments()[0],
+                      (java.util.Map<String, String>) invocation.getArguments()[1]));
+              when(m.getAuthMethodCode())
+                  .thenAnswer(invocation -> kerberos_provider.getAuthMethodCode());
+              when(m.getClientUsername())
+                  .thenAnswer(invocation -> kerberos_provider.getClientUsername());
+              when(m.getClientSubject())
+                  .thenAnswer(invocation -> kerberos_provider.getClientSubject());
+            });
+  }
+
+  @After
+  public void after() throws Exception {
+    if (mockedSubject != null) {
+      mockedSubject.close();
+    }
+    if (mockedKerberosConstruction != null) {
+      mockedKerberosConstruction.close();
     }
   }
-  
+
   /**
    * Super basic implementation of the SecureRpcHelper for unit testing
    */
@@ -184,24 +211,15 @@ public class BaseTestSecureRpcHelper {
 
   @SuppressWarnings("unchecked")
   protected void setupChallenge() throws Exception {
-    Mockito.doAnswer(new Answer<byte[]>() {
-      @Override
-      public byte[] answer(final InvocationOnMock invocation) throws Throwable {
-        final PrivilegedExceptionAction<byte[]> cb = 
-            (PrivilegedExceptionAction<byte[]>)invocation.getArguments()[1];
-        return cb.run();
-      }
-    }).when(Subject.class);
-    Subject.doAs(any(Subject.class), any(PrivilegedExceptionAction.class));
-  }
-
-  @BeforeEach
-  void setUpStaticMocks() {
-    mockedSubject = Mockito.mockStatic(Subject.class);
-  }
-
-  @AfterEach
-  void tearDownStaticMocks() {
-    mockedSubject.closeOnDemand();
+    mockedSubject.when(() -> Subject.doAs(nullable(Subject.class),
+        any(PrivilegedExceptionAction.class)))
+      .thenAnswer(new Answer<byte[]>() {
+        @Override
+        public byte[] answer(final InvocationOnMock invocation) throws Throwable {
+          final PrivilegedExceptionAction<byte[]> cb =
+              (PrivilegedExceptionAction<byte[]>)invocation.getArguments()[1];
+          return cb.run();
+        }
+      });
   }
 }

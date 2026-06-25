@@ -29,8 +29,6 @@ package org.hbase.async;
 import static org.junit.Assert.*;
 
 import static org.mockito.Mockito.*;
-import static org.powermock.api.mockito.PowerMockito.verifyPrivate;
-import static org.powermock.api.mockito.PowerMockito.whenNew;
 
 import java.lang.reflect.Field;
 import java.net.InetAddress;
@@ -50,10 +48,12 @@ import org.hbase.async.HBaseClient.ZKClient.ZKCallback;
 import org.hbase.async.generated.HBasePB.ServerName;
 import org.hbase.async.generated.ZooKeeperPB.MetaRegionServer;
 import org.jboss.netty.util.TimerTask;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
 import org.mockito.MockedConstruction;
+import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
@@ -73,30 +73,52 @@ public class TestZKClient {
   private ZooKeeper zk = mock(ZooKeeper.class);
   private ArrayList<Deferred<Object>> deferred_rootregion;
 
+  /**
+   * Intercepts {@code new ZooKeeper(...)} performed by {@code connectZK()} and
+   * makes the constructed instance delegate {@code close()} to the shared
+   * {@link #zk} mock so that the existing {@code verify(zk).close()} and
+   * {@code zk.close()} stubbing in the tests continue to behave as they did
+   * under PowerMock's {@code whenNew(ZooKeeper.class).thenReturn(zk)}.
+   */
+  private MockedConstruction<ZooKeeper> mockZooKeeper;
+
   @Before
   public void before() throws Exception {
-    try (MockedConstruction<ZooKeeper> mockZooKeeper = Mockito.mockConstruction(ZooKeeper.class)) {
-      client = mock(HBaseClient.class);
-      config = new Config();
-      Field configField = client.getClass().getDeclaredField("config");
-      configField.setAccessible(true);
-      configField.set(client, config);
-      zk_client = Mockito.spy(client.new ZKClient(quorum, base_path));
+    mockZooKeeper = Mockito.mockConstruction(ZooKeeper.class,
+        (m, ctx) -> Mockito.doAnswer(new Answer<Void>() {
+          @Override
+          public Void answer(final InvocationOnMock invocation) throws Throwable {
+            zk.close();
+            return null;
+          }
+        }).when(m).close());
 
-      // PowerMock private method stubbing is not supported by Mockito. Refactor the private method to package-private or extract to a collaborator.
-      Mockito.doAnswer(new Answer<RegionClient>(){
-        @Override
-        public RegionClient answer(InvocationOnMock invocation) throws Throwable {
-          final Object[] args = invocation.getArguments();
-          final String endpoint = (String)args[0] + ":" + (Integer)args[1];
-          final RegionClient rc = mock(RegionClient.class);
-          when(rc.getRemoteAddress()).thenReturn(endpoint);
-          return rc;
-        }
-      }).when(client, "newClient", anyString(), anyInt());
+    client = mock(HBaseClient.class);
+    config = new Config();
+    Field configField = client.getClass().getDeclaredField("config");
+    configField.setAccessible(true);
+    configField.set(client, config);
+    zk_client = Mockito.spy(client.new ZKClient(quorum, base_path));
+
+    Mockito.doAnswer(new Answer<RegionClient>(){
+      @Override
+      public RegionClient answer(InvocationOnMock invocation) throws Throwable {
+        final Object[] args = invocation.getArguments();
+        final String endpoint = (String)args[0] + ":" + (Integer)args[1];
+        final RegionClient rc = mock(RegionClient.class);
+        when(rc.getRemoteAddress()).thenReturn(endpoint);
+        return rc;
+      }
+    }).when(client).newClient(anyString(), anyInt());
+  }
+
+  @After
+  public void after() throws Exception {
+    if (mockZooKeeper != null) {
+      mockZooKeeper.close();
     }
   }
-  
+
   @Test
   public void ctor() throws Exception {
     assertNotNull(client.new ZKClient(quorum, base_path));
@@ -131,7 +153,7 @@ public class TestZKClient {
     assertNotNull(root);
     assertNotNull(deferred_rootregion);
     assertEquals(1, deferred_rootregion.size());
-    verifyPrivate(zk_client).invoke("connectZK");
+    verify(zk_client).connectZK();
   }
 
   @Test
@@ -146,13 +168,13 @@ public class TestZKClient {
     assertNotNull(root);
     assertNotNull(deferred_rootregion);
     assertEquals(2, deferred_rootregion.size());
-    verifyPrivate(zk_client).invoke("connectZK");
+    verify(zk_client).connectZK();
   }
 
   @Test
   public void getDeferredRootIfBeingLookedUpNull() throws Exception {
     assertNull(zk_client.getDeferredRootIfBeingLookedUp());
-    verifyPrivate(zk_client, never()).invoke("connectZK");
+    verify(zk_client, never()).connectZK();
   }
 
   @Test
@@ -167,15 +189,23 @@ public class TestZKClient {
     assertNotNull(root);
     assertNotNull(deferred_rootregion);
     assertEquals(2, deferred_rootregion.size());
-    verifyPrivate(zk_client, never()).invoke("connectZK");
+    verify(zk_client, never()).connectZK();
   }
   
   @Test (expected = NonRecoverableException.class)
   public void connectZKUnknownHostExcetion() throws Exception {
-    whenNew(ZooKeeper.class).withArguments(
-        anyString(), anyInt(), (Watcher)any()).thenThrow(
-        new UnknownHostException("Bad Quorum"));
-    zk_client.getDeferredRoot().joinUninterruptibly();
+    // Mockito's mockConstruction initializer cannot make a constructor *throw*
+    // (it wraps any thrown exception in a MockitoException), so instead of
+    // intercepting `new ZooKeeper(...)` we let the real constructor run against
+    // an unresolvable quorum.  The real ZooKeeper constructor resolves the
+    // quorum hosts synchronously and throws UnknownHostException, which
+    // connectZK() turns into a NonRecoverableException -- exactly what the
+    // original whenNew(ZooKeeper.class).thenThrow(UnknownHostException) did.
+    mockZooKeeper.close();
+    mockZooKeeper = null;
+    final ZKClient bad_zk_client = Mockito.spy(
+        client.new ZKClient("no-such-host.invalid:2181", base_path));
+    bad_zk_client.getDeferredRoot().joinUninterruptibly();
   }
 
   /**
@@ -194,15 +224,17 @@ public class TestZKClient {
     try (MockedConstruction<ZKCallback> mockZKCallback = Mockito.mockConstruction(ZKCallback.class)) {
       final WatchedEvent event = mock(WatchedEvent.class);
       when(event.getState()).thenReturn(KeeperState.SyncConnected);
-      final ZKCallback cb = zk_client.new ZKCallback();
       Field zkField = zk_client.getClass().getDeclaredField("zk");
       zkField.setAccessible(true);
       zkField.set(zk_client, zk);
 
       zk_client.process(event);
-      verifyPrivate(zk_client).invoke("getRootRegion");
-      verifyPrivate(zk_client, never()).invoke("connectZK");
-      verifyPrivate(zk_client, never()).invoke("disconnectZK");
+      verify(zk_client).getRootRegion();
+      verify(zk_client, never()).connectZK();
+      verify(zk_client, never()).disconnectZK();
+      // getRootRegion() constructs a single ZKCallback (intercepted by the
+      // MockedConstruction) and passes it to both getData() calls.
+      final ZKCallback cb = mockZKCallback.constructed().get(0);
       verify(zk).getData("/hbase/root-region-server", zk_client, cb, null);
       verify(zk).getData("/hbase/meta-region-server", zk_client, cb, null);
     }
@@ -219,9 +251,9 @@ public class TestZKClient {
     deferred_rootregionField.set(zk_client, deferred_rootregion);
 
     zk_client.process(event);
-    verifyPrivate(zk_client, never()).invoke("getRootRegion");
-    verifyPrivate(zk_client).invoke("connectZK"); // null rootregion
-    verifyPrivate(zk_client).invoke("disconnectZK");
+    verify(zk_client, never()).getRootRegion();
+    verify(zk_client).connectZK(); // null rootregion
+    verify(zk_client).disconnectZK();
   }
   
   @Test
@@ -230,18 +262,18 @@ public class TestZKClient {
     when(event.getState()).thenReturn(KeeperState.AuthFailed);
     
     zk_client.process(event);
-    verifyPrivate(zk_client, never()).invoke("getRootRegion");
-    verifyPrivate(zk_client, never()).invoke("connectZK"); // null rootregion
-    verifyPrivate(zk_client).invoke("disconnectZK");
+    verify(zk_client, never()).getRootRegion();
+    verify(zk_client, never()).connectZK(); // null rootregion
+    verify(zk_client).disconnectZK();
   }
   
   @Test
   public void processNull() throws Exception {
     // ZK should never return a null, but if it does, we just swallow it
     zk_client.process(null);
-    verifyPrivate(zk_client, never()).invoke("getRootRegion");
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
+    verify(zk_client, never()).getRootRegion();
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
   }
   
   @Test
@@ -250,9 +282,9 @@ public class TestZKClient {
     when(event.getState()).thenThrow(new RuntimeException("Fail!"));
     
     zk_client.process(null);
-    verifyPrivate(zk_client, never()).invoke("getRootRegion");
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
+    verify(zk_client, never()).getRootRegion();
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
   }
 
   @Test
@@ -306,10 +338,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
     cb.processResult(Code.OK.intValue(), "/hbase/root-region-server", null, 
         data, stat);
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client).invoke("disconnectZK");
-    verifyPrivate(zk_client, never()).invoke("retryGetRootRegionLater");
+    verify(client).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client).disconnectZK();
+    verify(zk_client, never()).retryGetRootRegionLater();
     assertEquals(Byte.valueOf("1"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
     assertEquals(Byte.valueOf("0"), 
@@ -322,10 +354,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1,50511,1388534400000".getBytes(CHARSET);
     cb.processResult(Code.OK.intValue(), "/hbase/root-region-server", null, 
         data, stat);
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client).invoke("disconnectZK");
-    verifyPrivate(zk_client, never()).invoke("retryGetRootRegionLater");
+    verify(client).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client).disconnectZK();
+    verify(zk_client, never()).retryGetRootRegionLater();
     assertEquals(Byte.valueOf("1"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
     assertEquals(Byte.valueOf("0"), 
@@ -348,10 +380,10 @@ public class TestZKClient {
     
     cb.processResult(Code.OK.intValue(), "/hbase/meta-region-server", null, 
         data, stat);
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client).invoke("disconnectZK");
-    verifyPrivate(zk_client, never()).invoke("retryGetRootRegionLater");
+    verify(client).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client).disconnectZK();
+    verify(zk_client, never()).retryGetRootRegionLater();
     assertEquals(Byte.valueOf("0"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
     assertEquals(Byte.valueOf("1"), 
@@ -369,10 +401,10 @@ public class TestZKClient {
     
     cb.processResult(Code.OK.intValue(), "/hbase/root-region-server", null, 
         data, stat);
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client).invoke("disconnectZK");
-    verifyPrivate(zk_client, never()).invoke("retryGetRootRegionLater");
+    verify(client).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client).disconnectZK();
+    verify(zk_client, never()).retryGetRootRegionLater();
     assertEquals(Byte.valueOf("1"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
     assertEquals(Byte.valueOf("0"), 
@@ -385,10 +417,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
     cb.processResult(Code.OK.intValue(), "/hbase/meta-region-server", null, 
         data, stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
-    verifyPrivate(zk_client).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
+    verify(zk_client).retryGetRootRegionLater();
     verify(client).newTimeout((TimerTask)any(), anyLong());
     assertEquals(Byte.valueOf("0"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
@@ -410,10 +442,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
     cb.processResult(Code.OK.intValue(), "", null, 
         data, stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
-    verifyPrivate(zk_client).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
+    verify(zk_client).retryGetRootRegionLater();
     verify(client).newTimeout((TimerTask)any(), anyLong());
     assertEquals(Byte.valueOf("0"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
@@ -427,10 +459,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
     cb.processResult(Code.OK.intValue(), "/hbase/something-unknown", null, 
         data, stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
-    verifyPrivate(zk_client).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
+    verify(zk_client).retryGetRootRegionLater();
     verify(client).newTimeout((TimerTask)any(), anyLong());
     assertEquals(Byte.valueOf("0"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
@@ -444,10 +476,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
     cb.processResult(Code.NONODE.intValue(), "/hbase/root-region-server", null, 
         data, stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
-    verifyPrivate(zk_client, never()).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
+    verify(zk_client, never()).retryGetRootRegionLater();
     assertEquals(Byte.valueOf("2"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
     assertEquals(Byte.valueOf("0"), 
@@ -463,10 +495,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
     cb.processResult(Code.NONODE.intValue(), "/hbase/root-region-server", null,
         data, stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
-    verifyPrivate(zk_client, never()).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
+    verify(zk_client, never()).retryGetRootRegionLater();
     assertEquals(Byte.valueOf("2"),
         (Byte)Whitebox.getInternalState(cb, "found_root"));
     assertEquals(Byte.valueOf("1"),
@@ -482,10 +514,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
     cb.processResult(Code.NONODE.intValue(), "/hbase/root-region-server", null,
         data, stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
-    verifyPrivate(zk_client).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
+    verify(zk_client).retryGetRootRegionLater();
     verify(client).newTimeout((TimerTask)any(), anyLong());
     assertEquals(Byte.valueOf("2"),
         (Byte)Whitebox.getInternalState(cb, "found_root"));
@@ -499,10 +531,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
     cb.processResult(Code.NONODE.intValue(), "/hbase/meta-region-server", null, 
         data, stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
-    verifyPrivate(zk_client, never()).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
+    verify(zk_client, never()).retryGetRootRegionLater();
     assertEquals(Byte.valueOf("0"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
     assertEquals(Byte.valueOf("2"), 
@@ -518,10 +550,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
     cb.processResult(Code.NONODE.intValue(), "/hbase/meta-region-server", null,
         data, stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
-    verifyPrivate(zk_client, never()).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
+    verify(zk_client, never()).retryGetRootRegionLater();
     assertEquals(Byte.valueOf("1"),
         (Byte)Whitebox.getInternalState(cb, "found_root"));
     assertEquals(Byte.valueOf("2"),
@@ -537,10 +569,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
     cb.processResult(Code.NONODE.intValue(), "/hbase/meta-region-server", null,
         data, stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
-    verifyPrivate(zk_client).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
+    verify(zk_client).retryGetRootRegionLater();
     verify(client).newTimeout((TimerTask)any(), anyLong());
     assertEquals(Byte.valueOf("2"),
         (Byte)Whitebox.getInternalState(cb, "found_root"));
@@ -554,10 +586,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
     cb.processResult(Code.NOAUTH.intValue(), "/hbase/root-region-server", null, 
         data, stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client).invoke("connectZK");
-    verifyPrivate(zk_client).invoke("disconnectZK");
-    verifyPrivate(zk_client, never()).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client).connectZK();
+    verify(zk_client).disconnectZK();
+    verify(zk_client, never()).retryGetRootRegionLater();
     assertEquals(Byte.valueOf("0"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
     assertEquals(Byte.valueOf("0"), 
@@ -570,10 +602,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
     cb.processResult(Code.NOAUTH.intValue(), "/hbase/meta-region-server", null, 
         data, stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client).invoke("connectZK");
-    verifyPrivate(zk_client).invoke("disconnectZK");
-    verifyPrivate(zk_client, never()).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client).connectZK();
+    verify(zk_client).disconnectZK();
+    verify(zk_client, never()).retryGetRootRegionLater();
     assertEquals(Byte.valueOf("0"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
     assertEquals(Byte.valueOf("0"), 
@@ -585,10 +617,10 @@ public class TestZKClient {
     final ZKCallback cb = zk_client.new ZKCallback();
     cb.processResult(Code.OK.intValue(), "/hbase/root-region-server", null, 
         null, stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
-    verifyPrivate(zk_client).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
+    verify(zk_client).retryGetRootRegionLater();
     verify(client).newTimeout((TimerTask)any(), anyLong());
     assertEquals(Byte.valueOf("0"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
@@ -601,10 +633,10 @@ public class TestZKClient {
     final ZKCallback cb = zk_client.new ZKCallback();
     cb.processResult(Code.OK.intValue(), "/hbase/root-region-server", null, 
         new byte[]{}, stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
-    verifyPrivate(zk_client).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
+    verify(zk_client).retryGetRootRegionLater();
     verify(client).newTimeout((TimerTask)any(), anyLong());
     assertEquals(Byte.valueOf("0"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
@@ -617,10 +649,10 @@ public class TestZKClient {
     final ZKCallback cb = zk_client.new ZKCallback();
     cb.processResult(Code.OK.intValue(), "/hbase/meta-region-server", null, 
         new byte[65535], stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
-    verifyPrivate(zk_client).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
+    verify(zk_client).retryGetRootRegionLater();
     verify(client).newTimeout((TimerTask)any(), anyLong());
     assertEquals(Byte.valueOf("0"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
@@ -634,10 +666,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1".getBytes(CHARSET);
     cb.processResult(Code.OK.intValue(), "/hbase/root-region-server", null, 
         data, stat);
-    verifyPrivate(client, never()).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, never()).invoke("connectZK");
-    verifyPrivate(zk_client, never()).invoke("disconnectZK");
-    verifyPrivate(zk_client).invoke("retryGetRootRegionLater");
+    verify(client, never()).newClient("127.0.0.1", 50511);
+    verify(zk_client, never()).connectZK();
+    verify(zk_client, never()).disconnectZK();
+    verify(zk_client).retryGetRootRegionLater();
     verify(client).newTimeout((TimerTask)any(), anyLong());
     assertEquals(Byte.valueOf("1"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
@@ -653,10 +685,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
     cb.processResult(Code.OK.intValue(), "/hbase/root-region-server", null, 
         data, stat);
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client).invoke("connectZK");
-    verifyPrivate(zk_client).invoke("disconnectZK");
-    verifyPrivate(zk_client, never()).invoke("retryGetRootRegionLater");
+    verify(client).newClient("127.0.0.1", 50511);
+    verify(zk_client).connectZK();
+    verify(zk_client).disconnectZK();
+    verify(zk_client, never()).retryGetRootRegionLater();
     assertEquals(Byte.valueOf("1"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
     assertEquals(Byte.valueOf("0"), 
@@ -675,10 +707,10 @@ public class TestZKClient {
     final byte[] data = "127.0.0.1:50511".getBytes(CHARSET);
     cb.processResult(Code.OK.intValue(), "/hbase/root-region-server", null, 
         data, stat);
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
-    verifyPrivate(zk_client, times(2)).invoke("connectZK");
-    verifyPrivate(zk_client).invoke("disconnectZK");
-    verifyPrivate(zk_client, never()).invoke("retryGetRootRegionLater");
+    verify(client).newClient("127.0.0.1", 50511);
+    verify(zk_client, times(2)).connectZK();
+    verify(zk_client).disconnectZK();
+    verify(zk_client, never()).retryGetRootRegionLater();
     assertEquals(Byte.valueOf("1"), 
         (Byte)Whitebox.getInternalState(cb, "found_root"));
     assertEquals(Byte.valueOf("0"), 
@@ -694,7 +726,7 @@ public class TestZKClient {
     final RegionClient rc = cb.handleRootZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
+    verify(client).newClient("127.0.0.1", 50511);
   }
   
   @Test
@@ -704,21 +736,24 @@ public class TestZKClient {
     final RegionClient rc = cb.handleRootZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
+    verify(client).newClient("127.0.0.1", 50511);
   }
   
   @Test
   public void handleRootZnode90Resolve() throws Exception {
     final InetAddress addr = mock(InetAddress.class);
     when(addr.getHostAddress()).thenReturn("192.168.1.1");
-    Mockito.when(InetAddress.getByName("myzkhost")).thenReturn(addr);
-    
-    final ZKCallback cb = zk_client.new ZKCallback();
-    final byte[] data = "myzkhost:50511".getBytes(CHARSET);
-    final RegionClient rc = cb.handleRootZnode(data);
-    assertNotNull(rc);
-    assertEquals("192.168.1.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "192.168.1.1", 50511);
+    try (MockedStatic<InetAddress> mockedInet =
+        Mockito.mockStatic(InetAddress.class, Mockito.CALLS_REAL_METHODS)) {
+      mockedInet.when(() -> InetAddress.getByName("myzkhost")).thenReturn(addr);
+
+      final ZKCallback cb = zk_client.new ZKCallback();
+      final byte[] data = "myzkhost:50511".getBytes(CHARSET);
+      final RegionClient rc = cb.handleRootZnode(data);
+      assertNotNull(rc);
+      assertEquals("192.168.1.1:50511", rc.getRemoteAddress());
+      verify(client).newClient("192.168.1.1", 50511);
+    }
   }
 
   @Test
@@ -756,7 +791,7 @@ public class TestZKClient {
     final RegionClient rc = cb.handleRootZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
+    verify(client).newClient("127.0.0.1", 50511);
   }
 
   @Test (expected = NumberFormatException.class)
@@ -777,14 +812,17 @@ public class TestZKClient {
   public void handleRootZnode91Resolve() throws Exception {
     final InetAddress addr = mock(InetAddress.class);
     when(addr.getHostAddress()).thenReturn("192.168.1.1");
-    Mockito.when(InetAddress.getByName("myzkhost")).thenReturn(addr);
-    
-    final ZKCallback cb = zk_client.new ZKCallback();
-    final byte[] data = "myzkhost,50511,1388534400000".getBytes(CHARSET);
-    final RegionClient rc = cb.handleRootZnode(data);
-    assertNotNull(rc);
-    assertEquals("192.168.1.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "192.168.1.1", 50511);
+    try (MockedStatic<InetAddress> mockedInet =
+        Mockito.mockStatic(InetAddress.class, Mockito.CALLS_REAL_METHODS)) {
+      mockedInet.when(() -> InetAddress.getByName("myzkhost")).thenReturn(addr);
+
+      final ZKCallback cb = zk_client.new ZKCallback();
+      final byte[] data = "myzkhost,50511,1388534400000".getBytes(CHARSET);
+      final RegionClient rc = cb.handleRootZnode(data);
+      assertNotNull(rc);
+      assertEquals("192.168.1.1:50511", rc.getRemoteAddress());
+      verify(client).newClient("192.168.1.1", 50511);
+    }
   }
   
   @Test (expected = NumberFormatException.class)
@@ -796,12 +834,15 @@ public class TestZKClient {
   
   @Test (expected = NumberFormatException.class)
   public void handleRootZnode91NoHost() throws Exception {
-    Mockito.when(InetAddress.getByName("50511"))
-      .thenThrow(new UnknownHostException("No such host 50511"));
-    
-    final ZKCallback cb = zk_client.new ZKCallback();
-    final byte[] data = "50511,1388534400000".getBytes(CHARSET);
-    assertNull(cb.handleRootZnode(data));
+    try (MockedStatic<InetAddress> mockedInet =
+        Mockito.mockStatic(InetAddress.class, Mockito.CALLS_REAL_METHODS)) {
+      mockedInet.when(() -> InetAddress.getByName("50511"))
+        .thenThrow(new UnknownHostException("No such host 50511"));
+
+      final ZKCallback cb = zk_client.new ZKCallback();
+      final byte[] data = "50511,1388534400000".getBytes(CHARSET);
+      assertNull(cb.handleRootZnode(data));
+    }
   }
   
   @Test
@@ -811,7 +852,7 @@ public class TestZKClient {
     final RegionClient rc = cb.handleRootZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
+    verify(client).newClient("127.0.0.1", 50511);
   }
   
   @Test
@@ -826,7 +867,7 @@ public class TestZKClient {
     final RegionClient rc = cb.handleRootZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
+    verify(client).newClient("127.0.0.1", 50511);
   }
   
   @Test (expected = NumberFormatException.class)
@@ -853,7 +894,7 @@ public class TestZKClient {
     final RegionClient rc = cb.handleRootZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
+    verify(client).newClient("127.0.0.1", 50511);
   }
   
   @Test
@@ -915,7 +956,7 @@ public class TestZKClient {
     final RegionClient rc = cb.handleRootZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
+    verify(client).newClient("127.0.0.1", 50511);
   }
   
   @Test
@@ -954,17 +995,20 @@ public class TestZKClient {
   
   @Test (expected = NumberFormatException.class)
   public void handleRootZnode92NoHost() throws Exception {
-    Mockito.when(InetAddress.getByName("50511"))
-      .thenThrow(new UnknownHostException("No such host 50511"));
-    
-    final ZKCallback cb = zk_client.new ZKCallback();
-    final byte[] string = "50511,1388534400000".getBytes(CHARSET);
-    final byte[] data = new byte[string.length + 6];
-    data[0] = ZKCallback.MAGIC;
-    Bytes.setInt(data, 1, 1);
-    System.arraycopy(string, 0, data, 6, string.length);
-    
-    assertNull(cb.handleRootZnode(data));
+    try (MockedStatic<InetAddress> mockedInet =
+        Mockito.mockStatic(InetAddress.class, Mockito.CALLS_REAL_METHODS)) {
+      mockedInet.when(() -> InetAddress.getByName("50511"))
+        .thenThrow(new UnknownHostException("No such host 50511"));
+
+      final ZKCallback cb = zk_client.new ZKCallback();
+      final byte[] string = "50511,1388534400000".getBytes(CHARSET);
+      final byte[] data = new byte[string.length + 6];
+      data[0] = ZKCallback.MAGIC;
+      Bytes.setInt(data, 1, 1);
+      System.arraycopy(string, 0, data, 6, string.length);
+
+      assertNull(cb.handleRootZnode(data));
+    }
   }
   
   @Test
@@ -979,27 +1023,33 @@ public class TestZKClient {
     final RegionClient rc = cb.handleRootZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
+    verify(client).newClient("127.0.0.1", 50511);
   }
   
   @Test
   public void handleRootZnodeUnknownHost() throws Exception {
-    Mockito.when(InetAddress.getByName("myzkhost"))
-      .thenThrow(new UnknownHostException("No such host myzkhost"));
-    
-    final ZKCallback cb = zk_client.new ZKCallback();
-    final byte[] data = "myzkhost:50511".getBytes(CHARSET);
-    assertNull(cb.handleRootZnode(data));
+    try (MockedStatic<InetAddress> mockedInet =
+        Mockito.mockStatic(InetAddress.class, Mockito.CALLS_REAL_METHODS)) {
+      mockedInet.when(() -> InetAddress.getByName("myzkhost"))
+        .thenThrow(new UnknownHostException("No such host myzkhost"));
+
+      final ZKCallback cb = zk_client.new ZKCallback();
+      final byte[] data = "myzkhost:50511".getBytes(CHARSET);
+      assertNull(cb.handleRootZnode(data));
+    }
   }
-  
+
   @Test (expected = RuntimeException.class)
   public void handleRootZnodeResolveException() throws Exception {
-    Mockito.when(InetAddress.getByName("myzkhost"))
-      .thenThrow(new RuntimeException("Pear shaped"));
-    
-    final ZKCallback cb = zk_client.new ZKCallback();
-    final byte[] data = "myzkhost:50511".getBytes(CHARSET);
-    cb.handleRootZnode(data);
+    try (MockedStatic<InetAddress> mockedInet =
+        Mockito.mockStatic(InetAddress.class, Mockito.CALLS_REAL_METHODS)) {
+      mockedInet.when(() -> InetAddress.getByName("myzkhost"))
+        .thenThrow(new RuntimeException("Pear shaped"));
+
+      final ZKCallback cb = zk_client.new ZKCallback();
+      final byte[] data = "myzkhost:50511".getBytes(CHARSET);
+      cb.handleRootZnode(data);
+    }
   }
   
   @Test (expected = NullPointerException.class)
@@ -1026,7 +1076,7 @@ public class TestZKClient {
     final RegionClient rc = cb.handleMetaZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
+    verify(client).newClient("127.0.0.1", 50511);
     assertFalse(client.has_root);
   }
 
@@ -1050,7 +1100,7 @@ public class TestZKClient {
     final RegionClient rc = cb.handleMetaZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
+    verify(client).newClient("127.0.0.1", 50511);
     assertTrue(client.has_root);
   }
   
@@ -1058,26 +1108,29 @@ public class TestZKClient {
   public void handleMetaZnodeResolve() throws Exception {
     final InetAddress addr = mock(InetAddress.class);
     when(addr.getHostAddress()).thenReturn("192.168.1.1");
-    Mockito.when(InetAddress.getByName("myzkhost")).thenReturn(addr);
-    
-    final ZKCallback cb = zk_client.new ZKCallback();
+    try (MockedStatic<InetAddress> mockedInet =
+        Mockito.mockStatic(InetAddress.class, Mockito.CALLS_REAL_METHODS)) {
+      mockedInet.when(() -> InetAddress.getByName("myzkhost")).thenReturn(addr);
 
-    final ServerName server = ServerName.newBuilder()
-        .setHostName("myzkhost").setPort(50511).build();
-    final MetaRegionServer meta_server = MetaRegionServer.newBuilder()
-          .setServer(server).build();
-    final byte[] data = new byte[meta_server.getSerializedSize() + 10];
-    data[0] = ZKCallback.MAGIC;
-    Bytes.setInt(data, 1, 1);
-    Bytes.setInt(data, HBaseClient.PBUF_MAGIC, 6);
-    System.arraycopy(meta_server.toByteArray(), 0, data, 10, 
-        meta_server.getSerializedSize());
-    
-    final RegionClient rc = cb.handleMetaZnode(data);
-    assertNotNull(rc);
-    assertEquals("192.168.1.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "192.168.1.1", 50511);
-    assertFalse(client.has_root);
+      final ZKCallback cb = zk_client.new ZKCallback();
+
+      final ServerName server = ServerName.newBuilder()
+          .setHostName("myzkhost").setPort(50511).build();
+      final MetaRegionServer meta_server = MetaRegionServer.newBuilder()
+            .setServer(server).build();
+      final byte[] data = new byte[meta_server.getSerializedSize() + 10];
+      data[0] = ZKCallback.MAGIC;
+      Bytes.setInt(data, 1, 1);
+      Bytes.setInt(data, HBaseClient.PBUF_MAGIC, 6);
+      System.arraycopy(meta_server.toByteArray(), 0, data, 10,
+          meta_server.getSerializedSize());
+
+      final RegionClient rc = cb.handleMetaZnode(data);
+      assertNotNull(rc);
+      assertEquals("192.168.1.1:50511", rc.getRemoteAddress());
+      verify(client).newClient("192.168.1.1", 50511);
+      assertFalse(client.has_root);
+    }
   }
   
   @Test
@@ -1098,7 +1151,7 @@ public class TestZKClient {
     final RegionClient rc = cb.handleMetaZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
+    verify(client).newClient("127.0.0.1", 50511);
     assertFalse((Boolean)Whitebox.getInternalState(client, "has_root"));
   }
   
@@ -1163,7 +1216,7 @@ public class TestZKClient {
     final RegionClient rc = cb.handleMetaZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:0", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 0);
+    verify(client).newClient("127.0.0.1", 0);
   }
   
   // Defaults to localhost apparently
@@ -1185,7 +1238,7 @@ public class TestZKClient {
     final RegionClient rc = cb.handleMetaZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
+    verify(client).newClient("127.0.0.1", 50511);
   }
   
   // TODO - to be fixed in the source code
@@ -1201,7 +1254,7 @@ public class TestZKClient {
     final RegionClient rc = cb.handleMetaZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:50511", rc.getRemoteAddress());
-    verifyPrivate(client).invoke("newClient", "127.0.0.1", 50511);
+    verify(client).newClient("127.0.0.1", 50511);
   }
   
   @Test

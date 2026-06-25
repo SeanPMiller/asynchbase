@@ -94,7 +94,7 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
 
   @After
   public void tearDownStaticMocks() {
-    mockedChannels.closeOnDemand();
+    if (mockedChannels != null) mockedChannels.close();
   }
   
   @Test
@@ -552,7 +552,9 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
         Mockito.spy(new SecureRpcHelper96(hbase_client,
             region_client, new InetSocketAddress("127.0.0.1", 50512)));
     final SaslClient sasl_client = mock(SaslClient.class);
-    Field sasl_clientField = secure_helper.getClass().getDeclaredField("sasl_client");
+    // sasl_client is declared on the SecureRpcHelper superclass, so look it up
+    // there rather than on the spy's (SecureRpcHelper96) own declared fields.
+    Field sasl_clientField = SecureRpcHelper.class.getDeclaredField("sasl_client");
     sasl_clientField.setAccessible(true);
     sasl_clientField.set(secure_helper, sasl_client);
     when(sasl_client.isComplete()).thenReturn(false);
@@ -891,7 +893,7 @@ public class TestRegionClientDecode extends BaseTestRegionClient {
   
   @Test
   public void rpcTooBig() throws Exception {
-    Mockito.doNothing().when(RegionClient.class, "ensureReadable", 
+    Mockito.doNothing().when(region_client).ensureReadable(
         any(ChannelBuffer.class), anyInt());
     ChannelBuffer buffer = new ReadOnlyChannelBuffer(
         ChannelBuffers.wrappedBuffer(new byte[] { 16, 0, 0, 0, 1 }));

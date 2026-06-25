@@ -41,7 +41,7 @@ import org.mockito.stubbing.Answer;
 
 import org.powermock.reflect.Whitebox;
 
-final class TestPutRequest extends BaseTestHBaseClient {
+public final class TestPutRequest extends BaseTestHBaseClient {
   private static final long TIMESTAMP_LONG = 1234567890;
   private static final byte[][] QUALIFIERS = {{'q', 'u', 'a', 'l'},
     {'f', 'i' ,'e', 'r'}};

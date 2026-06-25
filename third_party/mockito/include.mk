@@ -23,7 +23,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-MOCKITO_VERSION := 1.9.5
+MOCKITO_VERSION := 4.11.0
 MOCKITO := third_party/mockito/mockito-core-$(MOCKITO_VERSION).jar
 MOCKITO_BASE_URL := http://central.maven.org/maven2/org/mockito/mockito-core/$(MOCKITO_VERSION)
 

@@ -42,10 +42,11 @@ import org.hbase.async.RegionClient;
 import org.hbase.async.generated.RPCPB;
 import org.hbase.async.ratelimiter.WriteRateLimiter.SIGNAL;
 import org.jboss.netty.channel.Channels;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import org.mockito.MockedConstruction;
+import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
@@ -56,18 +57,69 @@ public class TestWriteRateLimiter {
   private FakeTaskTimer timer;
   private LimitPolicy rate_policy;
   private LimitPolicy threshold_policy;
-  private RateLimiter guava_limiter;
   private RegionClient regin_client;
+  /** Static mock of RateLimiter held open for the duration of each test. */
+  private MockedStatic<RateLimiter> mockedRateLimiter;
+  /** Backing state for the deterministic RateLimiter mock returned by create. */
+  private double current_rate;
+  /**
+   * One-shot permit that models Guava's RateLimiter.tryAcquire() behaviour
+   * deterministically (no wall-clock dependency): a single permit becomes
+   * available immediately after create()/setRate(), is granted by the first
+   * tryAcquire(), and is then exhausted until the next setRate().  This is
+   * exactly what the isHealthy() assertions in these tests rely on.
+   */
+  private boolean permit_available;
 
   @Before
   public void before() throws Exception {
-    try (MockedConstruction<RateLimiter> mockRateLimiter = Mockito.mockConstruction(RateLimiter.class)) {
-      timer = new FakeTaskTimer();
-      rate_policy = new RateLimitPolicyImpl();
-      threshold_policy = new ThresholdLimitPolicyImpl();
-      guava_limiter = mock(RateLimiter.class);
-      regin_client = mock(RegionClient.class);
-      Mockito.when(regin_client.toString()).thenReturn("rc1");
+    timer = new FakeTaskTimer();
+    rate_policy = new RateLimitPolicyImpl();
+    threshold_policy = new ThresholdLimitPolicyImpl();
+    regin_client = mock(RegionClient.class);
+    Mockito.when(regin_client.toString()).thenReturn("rc1");
+
+    // Stub the static RateLimiter.create(double) so the production code under
+    // test receives a deterministic, controllable RateLimiter mock.
+    mockedRateLimiter = Mockito.mockStatic(RateLimiter.class);
+    final RateLimiter limiter_mock = mock(RateLimiter.class);
+    mockedRateLimiter.when(() -> RateLimiter.create(anyDouble()))
+        .thenAnswer(new Answer<RateLimiter>() {
+      @Override
+      public RateLimiter answer(InvocationOnMock invocation) throws Throwable {
+        current_rate = (Double) invocation.getArguments()[0];
+        permit_available = true;
+        return limiter_mock;
+      }
+    });
+    doAnswer(new Answer<Void>() {
+      @Override
+      public Void answer(InvocationOnMock invocation) throws Throwable {
+        current_rate = (Double) invocation.getArguments()[0];
+        permit_available = true;
+        return null;
+      }
+    }).when(limiter_mock).setRate(anyDouble());
+    when(limiter_mock.getRate()).thenAnswer(new Answer<Double>() {
+      @Override
+      public Double answer(InvocationOnMock invocation) throws Throwable {
+        return current_rate;
+      }
+    });
+    when(limiter_mock.tryAcquire()).thenAnswer(new Answer<Boolean>() {
+      @Override
+      public Boolean answer(InvocationOnMock invocation) throws Throwable {
+        final boolean granted = permit_available;
+        permit_available = false;
+        return granted;
+      }
+    });
+  }
+
+  @After
+  public void after() {
+    if (mockedRateLimiter != null) {
+      mockedRateLimiter.close();
     }
   }
 
@@ -291,13 +343,35 @@ public class TestWriteRateLimiter {
     public double current_rate = 0;
     public int acquire_attempts = 0;
     public boolean allow = true;
-    
+    /** Set when this helper opened (and therefore owns/closes) the static mock. */
+    private final MockedStatic<RateLimiter> owned_static;
+
+    /**
+     * Opens its own {@code MockedStatic<RateLimiter>} and is responsible for
+     * closing it via {@link #close()}.  Used by callers that don't manage the
+     * static mock themselves.
+     */
     public MockRateLimiter() {
+      this(Mockito.mockStatic(RateLimiter.class), true);
+    }
+
+    /**
+     * Wires {@code RateLimiter.create(double)} stubbing onto a static mock
+     * owned by the caller (which is responsible for closing it).
+     */
+    public MockRateLimiter(final MockedStatic<RateLimiter> mockedRateLimiter) {
+      this(mockedRateLimiter, false);
+    }
+
+    private MockRateLimiter(final MockedStatic<RateLimiter> mockedRateLimiter,
+                            final boolean owns) {
+      this.owned_static = owns ? mockedRateLimiter : null;
       limiter = mock(RateLimiter.class);
-      
+
       // since the limiter may be nulled and created anew, make sure to reset
       // counters and flags.
-      when(RateLimiter.create(anyDouble())).thenAnswer(new Answer<RateLimiter>() {
+      mockedRateLimiter.when(() -> RateLimiter.create(anyDouble()))
+          .thenAnswer(new Answer<RateLimiter>() {
         @Override
         public RateLimiter answer(InvocationOnMock invocation) throws Throwable {
           current_rate = (Double)invocation.getArguments()[0];
@@ -306,7 +380,7 @@ public class TestWriteRateLimiter {
           return limiter;
         }
       });
-      
+
       when(limiter.tryAcquire()).thenAnswer(new Answer<Boolean>() {
         @Override
         public Boolean answer(InvocationOnMock invocation) throws Throwable {
@@ -329,6 +403,13 @@ public class TestWriteRateLimiter {
           return current_rate;
         }
       });
+    }
+
+    /** Closes the static mock if this helper owns it. */
+    public void close() {
+      if (owned_static != null) {
+        owned_static.close();
+      }
     }
   }
 }

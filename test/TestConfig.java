@@ -35,6 +35,7 @@ import java.util.Properties;
 
 import org.junit.Test;
 
+import org.mockito.MockedConstruction;
 import org.mockito.Mockito;
 
 public class TestConfig {
@@ -78,17 +79,19 @@ public class TestConfig {
 
   @Test
   public void constructorWithFile() throws Exception {
-    try (MockedConstruction<Properties> mockProperties = Mockito.mockConstruction(Properties.class)) {
-      try (MockedConstruction<FileInputStream> mockFileInputStream = Mockito.mockConstruction(FileInputStream.class)) {
-        final Properties props = new Properties();
-        props.setProperty("asynchbase.test", "val1");
-
-        final Config config = new Config("/tmp/config.file");
-        assertNotNull(config);
-        assertEquals("/tmp/config.file", config.config_location);
-        assertEquals("val1", config.getString("asynchbase.test"));
-      }
+    // java.util.Properties / FileInputStream are JDK bootstrap classes that the
+    // inline mock maker can't instrument, so exercise the real load path with a
+    // real temp config file instead.
+    final java.io.File file = java.io.File.createTempFile("asynchbase-test", ".conf");
+    file.deleteOnExit();
+    try (java.io.Writer w = new java.io.FileWriter(file)) {
+      w.write("asynchbase.test=val1\n");
     }
+
+    final Config config = new Config(file.getAbsolutePath());
+    assertNotNull(config);
+    assertEquals(file.getAbsolutePath(), config.config_location);
+    assertEquals("val1", config.getString("asynchbase.test"));
   }
 
   @Test(expected = FileNotFoundException.class)

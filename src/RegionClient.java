@@ -1468,7 +1468,7 @@ public final class RegionClient extends ReplayingDecoder<VoidEnum> {
    * All RPCs in flight will fail with a {@link ConnectionResetException} and
    * all edits buffered will be re-scheduled.
    */
-  private void cleanup(final Channel chan) {
+  void cleanup(final Channel chan) {
     final ConnectionResetException exception =
       new ConnectionResetException(chan);
     failOrRetryRpcs(rpcs_inflight.values(), exception);
@@ -2004,7 +2004,8 @@ public final class RegionClient extends ReplayingDecoder<VoidEnum> {
    * @param buf Buffer to check.
    * @param nbytes Number of bytes desired.
    */
-  private static void ensureReadable(final ChannelBuffer buf, final int nbytes) {
+  // Package-private, non-static so tests can stub it on a RegionClient spy.
+  void ensureReadable(final ChannelBuffer buf, final int nbytes) {
     buf.markReaderIndex();
     buf.skipBytes(nbytes);
     buf.resetReaderIndex();
@@ -2017,7 +2018,7 @@ public final class RegionClient extends ReplayingDecoder<VoidEnum> {
    * @return The de-serialized RPC response (which can be {@code null}
    * or an exception).
    */
-  private Object deserialize(final ChannelBuffer buf, final HBaseRpc rpc) {
+  Object deserialize(final ChannelBuffer buf, final HBaseRpc rpc) {
     // The 1st byte of the payload contains flags:
     //   0x00  Old style success (prior 0.92).
     //   0x01  RPC failed with an exception.
@@ -2285,7 +2286,10 @@ public final class RegionClient extends ReplayingDecoder<VoidEnum> {
    */
   static int numberOfKeyValuesAhead(final ChannelBuffer buf, int length) {
     // Immediately try to "fault" if `length' bytes aren't available.
-    ensureReadable(buf, length);
+    // (Inlined ensureReadable() since this is a static context.)
+    buf.markReaderIndex();
+    buf.skipBytes(length);
+    buf.resetReaderIndex();
     int num_kv = 0;
     int offset = buf.readerIndex();
     length += offset;
@@ -2359,7 +2363,10 @@ public final class RegionClient extends ReplayingDecoder<VoidEnum> {
     final int length = buf.readInt();  // Guaranteed > 0 as we have > 0 Result.
     HBaseRpc.checkNonEmptyArrayLength(buf, length);
     // Immediately try to "fault" if `length' bytes aren't available.
-    ensureReadable(buf, length);
+    // (Inlined ensureReadable() since this is a static context.)
+    buf.markReaderIndex();
+    buf.skipBytes(length);
+    buf.resetReaderIndex();
     //LOG.debug("total Result[] response length={}", length);
     //LOG.debug("Result[] "+nresults+" buf="+buf+'='+Bytes.pretty(buf));
 
@@ -2520,7 +2527,7 @@ public final class RegionClient extends ReplayingDecoder<VoidEnum> {
                                                    };
 
   /** Common part of the hello header: magic + version.  */
-  private ChannelBuffer commonHeader(final byte[] buf, final byte[] hrpc) {
+  ChannelBuffer commonHeader(final byte[] buf, final byte[] hrpc) {
     final ChannelBuffer header = ChannelBuffers.wrappedBuffer(buf);
     header.clear();  // Set the writerIndex to 0.
 
@@ -2532,7 +2539,7 @@ public final class RegionClient extends ReplayingDecoder<VoidEnum> {
   }
 
   /** Hello header for HBase 0.95 and later.  */
-  private ChannelBuffer header095() {
+  ChannelBuffer header095() {
     final RPCPB.UserInformation user = RPCPB.UserInformation.newBuilder()
       .setEffectiveUser(System.getProperty("user.name", "asynchbase"))
       .build();
@@ -2560,7 +2567,7 @@ public final class RegionClient extends ReplayingDecoder<VoidEnum> {
   }
 
   /** Hello header for HBase 0.92 to 0.94.  */
-  private ChannelBuffer header092() {
+  ChannelBuffer header092() {
     final byte[] buf = new byte[4 + 1 + 4 + 1 + 44];
     final ChannelBuffer header = commonHeader(buf, HRPC3);
 
@@ -2579,7 +2586,7 @@ public final class RegionClient extends ReplayingDecoder<VoidEnum> {
   }
 
   /** Hello header for HBase 0.90 and earlier.  */
-  private ChannelBuffer header090() {
+  ChannelBuffer header090() {
     final byte[] buf = new byte[4 + 1 + 4 + 2 + 29 + 2 + 48 + 2 + 47];
     final ChannelBuffer header = commonHeader(buf, HRPC3);
 
@@ -2611,7 +2618,7 @@ public final class RegionClient extends ReplayingDecoder<VoidEnum> {
   }
 
   /** CDH3b3-specific header for Hadoop "security".  */
-  private ChannelBuffer headerCDH3b3() {
+  ChannelBuffer headerCDH3b3() {
     // CDH3 b3 includes a temporary patch that is non-backwards compatible
     // and results in clients getting disconnected as soon as they send the
     // header, because the HBase RPC protocol provides no mechanism to send
@@ -2637,7 +2644,7 @@ public final class RegionClient extends ReplayingDecoder<VoidEnum> {
    * @param chan The channel connected to the server we need to handshake.
    * @param header The header to use for the handshake.
    */
-  private void helloRpc(final Channel chan, final ChannelBuffer header) {
+  void helloRpc(final Channel chan, final ChannelBuffer header) {
     LOG.debug("helloRpc for the channel: {}", chan);
     Callback<Object, Exception> errorback = new Callback<Object, Exception>() {
 

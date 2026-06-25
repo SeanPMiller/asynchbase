@@ -50,25 +50,18 @@ import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
-import org.powermock.api.mockito.PowerMockito;
 import org.powermock.reflect.Whitebox;
 
 import com.stumbleupon.async.Deferred;
 
 public class TestHBaseClient extends BaseTestHBaseClient {
 
-  private MockedStatic<RegionInfo> mockedRegionInfo;
 
   @Before
   public void beforeLocal() {
-    mockedRegionInfo = Mockito.mockStatic(RegionInfo.class);
     client.has_root = false;
   }
 
-  @After(expected = BrokenMetaException.class)
-  public void tearDownStaticMocks() {
-    mockedRegionInfo.closeOnDemand();
-  }
   
   @Test
   public void ctorWithConfigDefaults() throws Exception {
@@ -389,9 +382,7 @@ public class TestHBaseClient extends BaseTestHBaseClient {
   @Test
   public void discoverRegionNewRegionInfo() throws Exception {
     clearCaches();
-    Method discoverRegionMethod = client.getClass().getDeclaredMethod("discoverRegion", ArrayList.class);
-    discoverRegionMethod.setAccessible(true);
-    Object obj = discoverRegionMethod.invoke(client, metaRow());
+    Object obj = Whitebox.invokeMethod(client, "discoverRegion", metaRow());
     assertNotNull(obj);
     final RegionClient region_client = (RegionClient)obj;
     assertEquals(1, regions_cache.size());
@@ -399,15 +390,13 @@ public class TestHBaseClient extends BaseTestHBaseClient {
     assertEquals(1, client2regions.size());
     assertEquals("127.0.0.1:54321", region_client.getRemoteAddress());
     assertTrue(region_client == region2client.values().iterator().next());
-    PowerMockito.verifyPrivate(client, never()).invoke("invalidateRegionCache",
+    verify(client, never()).invalidateRegionCache(
         (byte[])any(), anyBoolean(), anyString());
   }
 
   @Test
   public void discoverRegionReplaceRegionInfo() throws Exception {
-    Method discoverRegionMethod = client.getClass().getDeclaredMethod("discoverRegion", ArrayList.class);
-    discoverRegionMethod.setAccessible(true);
-    Object obj = discoverRegionMethod.invoke(client, metaRow());
+    Object obj = Whitebox.invokeMethod(client, "discoverRegion", metaRow());
     assertNotNull(obj);
     final RegionClient region_client = (RegionClient)obj;
     assertEquals(2, regions_cache.size());
@@ -417,7 +406,7 @@ public class TestHBaseClient extends BaseTestHBaseClient {
     final Iterator<RegionClient> iterator = region2client.values().iterator();
     assertTrue(region_client != iterator.next());
     assertTrue(region_client == iterator.next());
-    PowerMockito.verifyPrivate(client, never()).invoke("invalidateRegionCache",
+    verify(client, never()).invalidateRegionCache(
         (byte[])any(), anyBoolean(), anyString());
   }
 
@@ -429,9 +418,7 @@ public class TestHBaseClient extends BaseTestHBaseClient {
     row.add(new KeyValue(region.name(), INFO, SERVER, "localhost:54321".getBytes()));
     row.add(metaRegionInfo(EMPTY_ARRAY, EMPTY_ARRAY, false, false, TABLE));
 
-    Method discoverRegionMethod = client.getClass().getDeclaredMethod("discoverRegion", ArrayList.class);
-    discoverRegionMethod.setAccessible(true);
-    Object obj = discoverRegionMethod.invoke(client, row);
+    Object obj = Whitebox.invokeMethod(client, "discoverRegion", row);
     assertNotNull(obj);
     final RegionClient region_client = (RegionClient)obj;
     assertEquals(1, regions_cache.size());
@@ -439,7 +426,7 @@ public class TestHBaseClient extends BaseTestHBaseClient {
     assertEquals(1, client2regions.size());
     assertTrue(region_client == region2client.values().iterator().next());
     assertEquals("127.0.0.1:54321", region_client.getRemoteAddress());
-    PowerMockito.verifyPrivate(client, never()).invoke("invalidateRegionCache",
+    verify(client, never()).invalidateRegionCache(
         (byte[])any(), anyBoolean(), anyString());
   }
 
@@ -452,9 +439,7 @@ public class TestHBaseClient extends BaseTestHBaseClient {
     // ignores all but the last
     row.add(new KeyValue(region.name(), INFO, SERVER, "localhost:54321".getBytes()));
 
-    Method discoverRegionMethod = client.getClass().getDeclaredMethod("discoverRegion", ArrayList.class);
-    discoverRegionMethod.setAccessible(true);
-    Object obj = discoverRegionMethod.invoke(client, row);
+    Object obj = Whitebox.invokeMethod(client, "discoverRegion", row);
     assertNotNull(obj);
     final RegionClient region_client = (RegionClient)obj;
     assertEquals(1, regions_cache.size());
@@ -462,7 +447,7 @@ public class TestHBaseClient extends BaseTestHBaseClient {
     assertEquals(1, client2regions.size());
     assertTrue(region_client == region2client.values().iterator().next());
     assertEquals("127.0.0.1:54321", region_client.getRemoteAddress());
-    PowerMockito.verifyPrivate(client, never()).invoke("invalidateRegionCache",
+    verify(client, never()).invalidateRegionCache(
         (byte[])any(), anyBoolean(), anyString());
   }
   
@@ -477,7 +462,7 @@ public class TestHBaseClient extends BaseTestHBaseClient {
     assertEquals(1, regions_cache.size());
     assertEquals(0, region2client.size());
     assertEquals(0, client2regions.size());
-    PowerMockito.verifyPrivate(client).invoke("invalidateRegionCache", 
+    verify(client).invalidateRegionCache(
         (byte[])any(), anyBoolean(), anyString());
   }
 
@@ -488,9 +473,7 @@ public class TestHBaseClient extends BaseTestHBaseClient {
     final ArrayList<KeyValue> row = new ArrayList<KeyValue>(2);
     row.add(new KeyValue(region.name(), INFO, SERVER, "localhost:54321".getBytes()));
 
-    Method discoverRegionMethod = client.getClass().getDeclaredMethod("discoverRegion", ArrayList.class);
-    discoverRegionMethod.setAccessible(true);
-    discoverRegionMethod.invoke(client, row);
+    Whitebox.invokeMethod(client, "discoverRegion", row);
   }
 
   @Test(expected = RegionOfflineException.class)
@@ -500,9 +483,7 @@ public class TestHBaseClient extends BaseTestHBaseClient {
     row.add(metaRegionInfo(EMPTY_ARRAY, EMPTY_ARRAY, true, false, TABLE));
     row.add(new KeyValue(region.name(), INFO, SERVER, "localhost:54321".getBytes()));
 
-    Method discoverRegionMethod = client.getClass().getDeclaredMethod("discoverRegion", ArrayList.class);
-    discoverRegionMethod.setAccessible(true);
-    discoverRegionMethod.invoke(client, row);
+    Whitebox.invokeMethod(client, "discoverRegion", row);
   }
   
   @Test
@@ -517,7 +498,7 @@ public class TestHBaseClient extends BaseTestHBaseClient {
     assertEquals(1, regions_cache.size());
     assertEquals(0, region2client.size());
     assertEquals(0, client2regions.size());
-    PowerMockito.verifyPrivate(client).invoke("invalidateRegionCache", 
+    verify(client).invalidateRegionCache(
         (byte[])any(), anyBoolean(), anyString());
   }
   
@@ -532,7 +513,7 @@ public class TestHBaseClient extends BaseTestHBaseClient {
     assertEquals(1, regions_cache.size());
     assertEquals(0, region2client.size());
     assertEquals(0, client2regions.size());
-    PowerMockito.verifyPrivate(client).invoke("invalidateRegionCache", 
+    verify(client).invalidateRegionCache(
         (byte[])any(), anyBoolean(), anyString());
   }
 
@@ -543,9 +524,7 @@ public class TestHBaseClient extends BaseTestHBaseClient {
     row.add(metaRegionInfo(EMPTY_ARRAY, EMPTY_ARRAY, false, false, TABLE));
     row.add(new KeyValue(region.name(), INFO, SERVER, "localhost".getBytes()));
 
-    Method discoverRegionMethod = client.getClass().getDeclaredMethod("discoverRegion", ArrayList.class);
-    discoverRegionMethod.setAccessible(true);
-    discoverRegionMethod.invoke(client, row);
+    Whitebox.invokeMethod(client, "discoverRegion", row);
   }
 
   @Test(expected = BrokenMetaException.class)
@@ -555,55 +534,55 @@ public class TestHBaseClient extends BaseTestHBaseClient {
     row.add(metaRegionInfo(EMPTY_ARRAY, EMPTY_ARRAY, false, false, TABLE));
     row.add(new KeyValue(region.name(), INFO, SERVER, "localhost:myport".getBytes()));
 
-    Method discoverRegionMethod = client.getClass().getDeclaredMethod("discoverRegion", ArrayList.class);
-    discoverRegionMethod.setAccessible(true);
-    discoverRegionMethod.invoke(client, row);
+    Whitebox.invokeMethod(client, "discoverRegion", row);
   }
 
   @Test(expected = BrokenMetaException.class)
   public void discoverRegionNewRegionNullStartKey() throws Exception {
-    mockedRegionInfo.when(() -> RegionInfo.fromKeyValue((KeyValue)any(), (byte[][])any()))
-        .thenAnswer(new Answer<RegionInfo>() {
-          @Override
-          public RegionInfo answer(final InvocationOnMock invocation) throws Throwable {
-            final byte[][] tmp = (byte[][])invocation.getArguments()[1];
-            tmp[0] = null;
-            return region;
-          }
-        });
+    // Scope the RegionInfo static mock to just this test so it doesn't null out
+    // RegionInfo.fromKeyValue() for the other discoverRegion tests.
+    try (MockedStatic<RegionInfo> mockedRegionInfo =
+             Mockito.mockStatic(RegionInfo.class)) {
+      mockedRegionInfo.when(() -> RegionInfo.fromKeyValue((KeyValue)any(), (byte[][])any()))
+          .thenAnswer(new Answer<RegionInfo>() {
+            @Override
+            public RegionInfo answer(final InvocationOnMock invocation) throws Throwable {
+              final byte[][] tmp = (byte[][])invocation.getArguments()[1];
+              tmp[0] = null;
+              return region;
+            }
+          });
 
-    clearCaches();
-    Method discoverRegionMethod = client.getClass().getDeclaredMethod("discoverRegion", ArrayList.class);
-    discoverRegionMethod.setAccessible(true);
-    discoverRegionMethod.invoke(client, metaRow());
+      clearCaches();
+      Whitebox.invokeMethod(client, "discoverRegion", metaRow());
+    }
   }
   
   @Test
   public void discoverRegionNewRegionInfoNullHost() throws Exception {
-    Mockito.when(InetAddress.getByName("54321"))
-      .thenThrow(new UnknownHostException("No such host 54321"));
-    clearCaches();
-    
-    assertNull(Whitebox.invokeMethod(client, "discoverRegion", metaRow()));
-    assertEquals(1, regions_cache.size());
-    assertEquals(0, region2client.size());
-    assertEquals(0, client2regions.size());
-    PowerMockito.verifyPrivate(client).invoke("invalidateRegionCache", 
-        (byte[])any(), anyBoolean(), anyString());
+    try (MockedStatic<InetAddress> mockedInet =
+             Mockito.mockStatic(InetAddress.class)) {
+      mockedInet.when(() -> InetAddress.getByName(anyString()))
+        .thenThrow(new UnknownHostException("No such host 54321"));
+      clearCaches();
+
+      assertNull(Whitebox.invokeMethod(client, "discoverRegion", metaRow()));
+      assertEquals(1, regions_cache.size());
+      assertEquals(0, region2client.size());
+      assertEquals(0, client2regions.size());
+      verify(client).invalidateRegionCache(
+          (byte[])any(), anyBoolean(), anyString());
+    }
   }
 
   @Test(expected = TableNotFoundException.class)
   public void discoverRegionEmpty() throws Exception {
-    Method discoverRegionMethod = client.getClass().getDeclaredMethod("discoverRegion", ArrayList.class);
-    discoverRegionMethod.setAccessible(true);
-    discoverRegionMethod.invoke(client, new ArrayList<KeyValue>());
+    Whitebox.invokeMethod(client, "discoverRegion", new ArrayList<KeyValue>());
   }
 
   @Test(expected = NullPointerException.class)
   public void discoverRegionNull() throws Exception {
-    Method discoverRegionMethod = client.getClass().getDeclaredMethod("discoverRegion", ArrayList.class);
-    discoverRegionMethod.setAccessible(true);
-    discoverRegionMethod.invoke(client, (ArrayList<KeyValue>)null);
+    Whitebox.invokeMethod(client, "discoverRegion", (ArrayList<KeyValue>)null);
   }
 
   @Test

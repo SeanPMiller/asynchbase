@@ -174,6 +174,12 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <version>2.12.4</version>
         <configuration>
+          <!-- Some NSRE retry tests drive the (synchronous) FakeTimer through
+               ~100+ nested retries on a single call stack, which overflows the
+               smaller default thread stack on some JVMs/platforms.  Give the
+               test fork a generous stack.  (The jdk9plus profile repeats this
+               in its own argLine, since a profile argLine replaces this one.) -->
+          <argLine>-Xss8m</argLine>
           <excludes>
             <exclude>**/TestIntegration.java</exclude>
             <exclude>**/TestIncrementCoalescing.java</exclude>
@@ -218,6 +224,7 @@
       used in the signature.
     -->  
     <profile>
+      <id>jdk8</id>
       <activation>
         <jdk>1.8</jdk>
       </activation>
@@ -235,6 +242,31 @@
                 <exclude>**/TestIntegration.java</exclude>
                 <exclude>**/TestIncrementCoalescing.java</exclude>
               </excludes>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <!-- On JDK 9+ the platform strongly encapsulates the JDK's own modules.
+         powermock-reflect's Whitebox (and reflective test helpers) call
+         setAccessible() on members of java.base packages (e.g. Object.clone()),
+         which throws InaccessibleObjectException unless those packages are
+         opened to the unnamed module.  These flags are only added on JDK 9+
+         (JDK 8's launcher does not understand the add-opens option). -->
+    <profile>
+      <id>jdk9plus</id>
+      <activation>
+        <jdk>[9,)</jdk>
+      </activation>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <version>2.12.4</version>
+            <configuration>
+              <argLine>-Xss8m -Dnet.bytebuddy.experimental=true --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED --add-opens java.base/java.util.concurrent=ALL-UNNAMED --add-opens java.base/java.net=ALL-UNNAMED --add-opens java.base/java.io=ALL-UNNAMED --add-opens java.base/java.lang.reflect=ALL-UNNAMED</argLine>
             </configuration>
           </plugin>
         </plugins>
@@ -339,7 +371,17 @@
 
     <dependency>
       <groupId>org.mockito</groupId>
-      <artifactId>mockito-all</artifactId>
+      <artifactId>mockito-core</artifactId>
+      <version>@MOCKITO_VERSION@</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- The inline mock maker enables mockStatic()/mockConstruction(), which
+         replace the old PowerMock static/constructor mocking.  Mockito 4.x
+         keeps Java 8 compatibility (5.x requires Java 11+). -->
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-inline</artifactId>
       <version>@MOCKITO_VERSION@</version>
       <scope>test</scope>
     </dependency>
@@ -351,20 +393,17 @@
       <scope>test</scope>
     </dependency>
 
+    <!-- Only powermock-reflect is kept (a standalone reflection helper used for
+         Whitebox get/setInternalState/invokeMethod).  It pulls in no mocking
+         engine and works on JDK 8-17+.  The full PowerMock framework has been
+         removed in favour of native Mockito mockStatic/mockConstruction. -->
     <dependency>
       <groupId>org.powermock</groupId>
-      <artifactId>powermock-module-junit4</artifactId>
+      <artifactId>powermock-reflect</artifactId>
       <version>@POWERMOCK_MOCKITO_VERSION@</version>
       <scope>test</scope>
     </dependency>
 
-    <dependency>
-      <groupId>org.powermock</groupId>
-      <artifactId>powermock-api-mockito</artifactId>
-      <version>@POWERMOCK_MOCKITO_VERSION@</version>
-      <scope>test</scope>
-    </dependency>
-    
     <dependency>
       <groupId>ch.qos.logback</groupId>
       <artifactId>logback-core</artifactId>
@@ -375,6 +414,28 @@
       <groupId>ch.qos.logback</groupId>
       <artifactId>logback-classic</artifactId>
       <version>1.2.1</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- Override the byte-buddy that Mockito 4.11 bundles (1.12.19).  That
+         version cannot instrument JDK bootstrap classes (e.g. mockStatic on
+         java.util.concurrent.Executors) on modern JDKs, failing with
+         "Byte Buddy could not instrument all classes within the mock's type
+         hierarchy".  We pin the latest byte-buddy (supports JDK 8 through the
+         newest releases); for a JDK newer than this byte-buddy officially
+         knows about, the test JVM also sets -Dnet.bytebuddy.experimental=true
+         (see the jdk9plus profile).  Mockito stays on 4.x so the build still
+         runs on Java 8. -->
+    <dependency>
+      <groupId>net.bytebuddy</groupId>
+      <artifactId>byte-buddy</artifactId>
+      <version>1.18.10</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>net.bytebuddy</groupId>
+      <artifactId>byte-buddy-agent</artifactId>
+      <version>1.18.10</version>
       <scope>test</scope>
     </dependency>
 

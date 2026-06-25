@@ -42,7 +42,7 @@ import com.stumbleupon.async.Callback;
  * Requires a locally running HBase cluster.
  */
 @Ignore // ignore for test runners
-final class TestIncrementCoalescing {
+public final class TestIncrementCoalescing {
 
   private static final Logger LOG =
     Common.logger(TestIncrementCoalescing.class);

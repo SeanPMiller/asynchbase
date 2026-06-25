@@ -28,8 +28,7 @@ package org.hbase.async.auth;
 
 import static org.junit.Assert.*;
 
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 import java.security.Principal;
 import java.security.PrivilegedExceptionAction;
@@ -70,6 +69,7 @@ public class TestKerberosClientAuthProvider {
   private MockedStatic<Sasl> mockedSasl;
   private MockedStatic<Subject> mockedSubject;
   private MockedStatic<Login> mockedLogin;
+  private MockedConstruction<KerberosName> mockedKerberosName;
   private HBaseClient client;
   private Config config;
   private Login login;
@@ -88,60 +88,79 @@ public class TestKerberosClientAuthProvider {
   @SuppressWarnings("unchecked")
   @Before
   public void before() throws Exception {
-    try (MockedConstruction<KerberosName> mockKerberosName = Mockito.mockConstruction(KerberosName.class)) {
-      mockedSasl = Mockito.mockStatic(Sasl.class);
-      mockedSubject = Mockito.mockStatic(Subject.class);
-      mockedLogin = Mockito.mockStatic(Login.class);
-      config = new Config();
-      client = mock(HBaseClient.class);
-      login = mock(Login.class);
-      subject = mock(Subject.class);
-      sasl_client = mock(SaslClient.class);
-      principal = mock(Principal.class);
-      kerberos_name = mock(KerberosName.class);
+    mockedSasl = Mockito.mockStatic(Sasl.class);
+    mockedSubject = Mockito.mockStatic(Subject.class);
+    mockedLogin = Mockito.mockStatic(Login.class);
+    config = new Config();
+    client = mock(HBaseClient.class);
+    login = mock(Login.class);
+    subject = mock(Subject.class);
+    sasl_client = mock(SaslClient.class);
+    principal = mock(Principal.class);
+    kerberos_name = mock(KerberosName.class);
 
-      config.overrideConfig(KerberosClientAuthProvider.PRINCIPAL_KEY, "ephebe");
+    config.overrideConfig(KerberosClientAuthProvider.PRINCIPAL_KEY, "ephebe");
 
-      when(client.getConfig()).thenReturn(config);
-      when(login.getSubject()).thenReturn(subject);
+    when(client.getConfig()).thenReturn(config);
+    when(login.getSubject()).thenReturn(subject);
 
-      principals = new HashSet<Principal>();
-      principals.add(principal);
-      when(subject.getPrincipals()).thenReturn(principals);
-      when(kerberos_name.toString()).thenReturn("Aching");
-      when(kerberos_name.getServiceName()).thenReturn("feegle");
-      when(kerberos_name.getHostName()).thenReturn("ephebe");
-      mockedLogin.when(Login::getCurrentLogin).thenReturn(login);
-      mockedSasl.when(() -> Sasl.createSaslClient(any(String[].class), anyString(),
-          anyString(), anyString(), anyMap(), any(CallbackHandler.class)))
-          .thenAnswer(new Answer<SaslClient>() {
-            @Override
-            public SaslClient answer(final InvocationOnMock invocation)
-                throws Throwable {
-              mechanism = ((String[])invocation.getArguments()[0])[0];
-              service_name = (String)invocation.getArguments()[2];
-              service_hostname = (String)invocation.getArguments()[3];
-              properties = (Map<String, String>)invocation.getArguments()[4];
-              return sasl_client;
-            }
-          });
-      Mockito.doAnswer(new Answer<SaslClient>() {
-        @Override
-        public SaslClient answer(final InvocationOnMock invocation) throws Throwable {
-          final PrivilegedExceptionAction<SaslClient> cb =
-              (PrivilegedExceptionAction<SaslClient>)invocation.getArguments()[1];
-          return cb.run();
-        }
-      }).when(Subject.class);
-      Subject.doAs(eq(subject), any(PrivilegedExceptionAction.class));
-    }
+    principals = new HashSet<Principal>();
+    principals.add(principal);
+    when(subject.getPrincipals()).thenReturn(principals);
+    when(kerberos_name.toString()).thenReturn("Aching");
+    when(kerberos_name.getServiceName()).thenReturn("feegle");
+    when(kerberos_name.getHostName()).thenReturn("ephebe");
+
+    // The production code constructs new KerberosName(...) instances internally.
+    // Stub each constructed instance the same way the kerberos_name mock is set
+    // up so the assertions continue to hold.
+    mockedKerberosName = Mockito.mockConstruction(KerberosName.class,
+        (m, ctx) -> {
+          when(m.toString()).thenReturn("Aching");
+          when(m.getServiceName()).thenReturn("feegle");
+          when(m.getHostName()).thenReturn("ephebe");
+        });
+
+    mockedLogin.when(Login::getCurrentLogin).thenReturn(login);
+    mockedSasl.when(() -> Sasl.createSaslClient(any(String[].class), nullable(String.class),
+        anyString(), anyString(), anyMap(), nullable(CallbackHandler.class)))
+        .thenAnswer(new Answer<SaslClient>() {
+          @Override
+          public SaslClient answer(final InvocationOnMock invocation)
+              throws Throwable {
+            mechanism = ((String[])invocation.getArguments()[0])[0];
+            service_name = (String)invocation.getArguments()[2];
+            service_hostname = (String)invocation.getArguments()[3];
+            properties = (Map<String, String>)invocation.getArguments()[4];
+            return sasl_client;
+          }
+        });
+    mockedSubject.when(() -> Subject.doAs(eq(subject),
+        any(PrivilegedExceptionAction.class)))
+        .thenAnswer(new Answer<SaslClient>() {
+          @Override
+          public SaslClient answer(final InvocationOnMock invocation) throws Throwable {
+            final PrivilegedExceptionAction<SaslClient> cb =
+                (PrivilegedExceptionAction<SaslClient>)invocation.getArguments()[1];
+            return cb.run();
+          }
+        });
   }
 
-  @After(expected = IllegalStateException.class)
+  @After
   public void tearDownStaticMocks() {
-    mockedLogin.closeOnDemand();
-    mockedSubject.closeOnDemand();
-    mockedSasl.closeOnDemand();
+    if (mockedKerberosName != null) {
+      mockedKerberosName.close();
+    }
+    if (mockedLogin != null) {
+      mockedLogin.close();
+    }
+    if (mockedSubject != null) {
+      mockedSubject.close();
+    }
+    if (mockedSasl != null) {
+      mockedSasl.close();
+    }
   }
   
   @Test
@@ -153,17 +172,19 @@ public class TestKerberosClientAuthProvider {
   
   @Test (expected = IllegalStateException.class)
   public void ctorLoginFailure() throws Exception {
-    Mockito.doThrow(new LoginException("Boo!")).when(Login.class);
-    Login.initUserIfNeeded(any(Config.class), any(HashedWheelTimer.class), 
-        anyString(), any(ClientCallbackHandler.class));
+    mockedLogin.when(() -> Login.initUserIfNeeded(any(Config.class),
+        nullable(HashedWheelTimer.class), nullable(String.class),
+        any(ClientCallbackHandler.class)))
+        .thenThrow(new LoginException("Boo!"));
     new KerberosClientAuthProvider(client);
   }
-  
+
   @Test (expected = RuntimeException.class)
   public void ctorOtherException() throws Exception {
-    Mockito.doThrow(new RuntimeException("Boo!")).when(Login.class);
-    Login.initUserIfNeeded(any(Config.class), any(HashedWheelTimer.class), 
-        anyString(), any(ClientCallbackHandler.class));
+    mockedLogin.when(() -> Login.initUserIfNeeded(any(Config.class),
+        nullable(HashedWheelTimer.class), nullable(String.class),
+        any(ClientCallbackHandler.class)))
+        .thenThrow(new RuntimeException("Boo!"));
     new KerberosClientAuthProvider(client);
   }
   
@@ -196,10 +217,11 @@ public class TestKerberosClientAuthProvider {
   @SuppressWarnings("unchecked")
   @Test (expected = IllegalStateException.class)
   public void newSaslClientFailedSubject() throws Exception {
-    Mockito.doThrow(new RuntimeException("Boo!")).when(Subject.class);
-    Subject.doAs(eq(subject), any(PrivilegedExceptionAction.class));
-    
-    final KerberosClientAuthProvider provider = 
+    mockedSubject.when(() -> Subject.doAs(eq(subject),
+        any(PrivilegedExceptionAction.class)))
+        .thenThrow(new RuntimeException("Boo!"));
+
+    final KerberosClientAuthProvider provider =
         new KerberosClientAuthProvider(client);
     final Map<String, String> props = new HashMap<String, String>(0);
     provider.newSaslClient("localhost", props);
@@ -208,8 +230,8 @@ public class TestKerberosClientAuthProvider {
   @SuppressWarnings("unchecked")
   @Test (expected = IllegalStateException.class)
   public void newSaslClientFailedCreation() throws Exception {
-    mockedSasl.when(() -> Sasl.createSaslClient(any(String[].class), anyString(),
-            anyString(), anyString(), anyMap(), any(CallbackHandler.class)))
+    mockedSasl.when(() -> Sasl.createSaslClient(any(String[].class), nullable(String.class),
+            anyString(), anyString(), anyMap(), nullable(CallbackHandler.class)))
         .thenThrow(new SaslException("Boo!"));
     
     final KerberosClientAuthProvider provider = 

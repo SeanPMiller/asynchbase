@@ -3593,7 +3593,7 @@ public final class HBaseClient {
    * @param reason If not {@code null}, will be used to log an INFO message
    * about the cache invalidation done.
    */
-  private void invalidateRegionCache(final byte[] region_name,
+  void invalidateRegionCache(final byte[] region_name,
                                      final boolean mark_as_nsred,
                                      final String reason) {
     if ((region_name == META_REGION_NAME && !has_root)  // HBase 0.95+
@@ -4254,7 +4254,8 @@ public final class HBaseClient {
    * @param port The port on which the region server is serving.
    * @return A client for this region server.
    */
-  private RegionClient newClient(final String host, final int port) {
+  // Package-private (was private) so Mockito spies can stub/verify it in tests.
+  RegionClient newClient(final String host, final int port) {
     // This big synchronized block is required because using a
     // ConcurrentHashMap wouldn't be sufficient.  We could still have 2
     // threads attempt to create the same client at the same time, and they
@@ -4777,7 +4778,7 @@ public final class HBaseClient {
      * recover happened -- e.g. us being unable to resolve the hostname
      * of any of the zookeeper servers.
      */
-    private void connectZK() {
+    void connectZK() {
       try {
         // Session establishment is asynchronous, so this won't block.
         synchronized (this) {
@@ -4833,7 +4834,7 @@ public final class HBaseClient {
     }
 
     /** Schedule a timer to retry {@link #getRootRegion} after some time.  */
-    private void retryGetRootRegionLater() {
+    void retryGetRootRegionLater() {
       newTimeout(new TimerTask() {
           public void run(final Timeout timeout) {
             if (!getRootRegion()) {  // Try to read the znodes
@@ -5071,7 +5072,7 @@ public final class HBaseClient {
      * @return true if a lookup was kicked off, false if not because we
      * weren't connected to ZooKeeper.
      */
-    private boolean getRootRegion() {
+    boolean getRootRegion() {
       synchronized (this) {
         if (zk != null) {
           LOG.debug("Finding the ROOT or META region in ZooKeeper");

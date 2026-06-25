@@ -26,8 +26,7 @@
  */
 package org.hbase.async;
 
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 import java.lang.reflect.Field;
 import java.util.Map;
@@ -89,8 +88,8 @@ public class BaseTestRegionClient {
     final HeapChannelBufferFactory factory = new HeapChannelBufferFactory();
     when(chan.getConfig().getBufferFactory()).thenReturn(factory);
 
-    // PowerMock private method stubbing is not supported by Mockito. Refactor the private method to package-private or extract to a collaborator.
-    Mockito.doAnswer(new Answer<RegionClient>(){
+    // newClient() is now package-private, so we can stub it on the mock.
+    doAnswer(new Answer<RegionClient>(){
       @Override
       public RegionClient answer(InvocationOnMock invocation) throws Throwable {
         final Object[] args = invocation.getArguments();
@@ -99,13 +98,13 @@ public class BaseTestRegionClient {
         when(rc.getRemoteAddress()).thenReturn(endpoint);
         return rc;
       }
-    }).when(hbase_client, "newClient", anyString(), anyInt());
+    }).when(hbase_client).newClient(anyString(), anyInt());
 
     region_client = Mockito.spy(new RegionClient(hbase_client, null, "localhost"));
-    Field chanField = region_client.getClass().getDeclaredField("chan");
+    Field chanField = RegionClient.class.getDeclaredField("chan");
     chanField.setAccessible(true);
     chanField.set(region_client, chan);
-    Field server_versionField = region_client.getClass().getDeclaredField("server_version");
+    Field server_versionField = RegionClient.class.getDeclaredField("server_version");
     server_versionField.setAccessible(true);
     server_versionField.set(region_client, RegionClient.SERVER_VERSION_095_OR_ABOVE);
     rpcs_inflight = Whitebox.getInternalState(region_client, "rpcs_inflight");
@@ -116,7 +115,7 @@ public class BaseTestRegionClient {
    * without security.
    */
   protected void injectSecurity() throws Exception {
-    Field secure_rpc_helperField = region_client.getClass().getDeclaredField("secure_rpc_helper");
+    Field secure_rpc_helperField = RegionClient.class.getDeclaredField("secure_rpc_helper");
     secure_rpc_helperField.setAccessible(true);
     secure_rpc_helperField.set(region_client, secure_rpc_helper);
 

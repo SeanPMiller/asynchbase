@@ -39,7 +39,7 @@ import org.junit.Test;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
-final class TestGetRequest extends BaseTestHBaseClient {
+public final class TestGetRequest extends BaseTestHBaseClient {
 
   /**
    * Test a simple get request with table and key

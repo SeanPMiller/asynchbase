@@ -28,7 +28,7 @@ package org.hbase.async;
 
 import static org.junit.Assert.*;
 
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
@@ -252,12 +252,11 @@ public class TestSecureRpcHelper extends BaseTestSecureRpcHelper {
   @Test (expected = IllegalStateException.class)
   public void processChallengePrivilegedActionException() throws Exception {
     final byte[] challenge = { 42 };
-    Mockito.mockStatic(Subject.class);
-    Mockito.doThrow(new PrivilegedActionException(
-        new RuntimeException("Boo!"))).when(Subject.class);
-    Subject.doAs(any(Subject.class), any(PrivilegedExceptionAction.class));
+    mockedSubject.when(() -> Subject.doAs(nullable(Subject.class),
+        any(PrivilegedExceptionAction.class)))
+      .thenThrow(new PrivilegedActionException(new RuntimeException("Boo!")));
 
-    config.overrideConfig(SecureRpcHelper.SECURITY_AUTHENTICATION_KEY, 
+    config.overrideConfig(SecureRpcHelper.SECURITY_AUTHENTICATION_KEY,
         "kerberos");
     final UTHelper helper = new UTHelper(client, region_client, remote_endpoint);
     helper.doProcessChallenge(challenge);
@@ -267,11 +266,11 @@ public class TestSecureRpcHelper extends BaseTestSecureRpcHelper {
   @Test (expected = RuntimeException.class)
   public void processChallengeRuntimeException() throws Exception {
     final byte[] challenge = { 42 };
-    Mockito.mockStatic(Subject.class);
-    Mockito.doThrow(new RuntimeException("Boo!")).when(Subject.class);
-    Subject.doAs(any(Subject.class), any(PrivilegedExceptionAction.class));
-    
-    config.overrideConfig(SecureRpcHelper.SECURITY_AUTHENTICATION_KEY, 
+    mockedSubject.when(() -> Subject.doAs(nullable(Subject.class),
+        any(PrivilegedExceptionAction.class)))
+      .thenThrow(new RuntimeException("Boo!"));
+
+    config.overrideConfig(SecureRpcHelper.SECURITY_AUTHENTICATION_KEY,
         "kerberos");
     final UTHelper helper = new UTHelper(client, region_client, remote_endpoint);
     helper.doProcessChallenge(challenge);

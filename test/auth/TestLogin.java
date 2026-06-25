@@ -63,15 +63,14 @@ import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
-import org.powermock.api.mockito.PowerMockito;
 import org.powermock.reflect.Whitebox;
 
 public class TestLogin {
   private MockedStatic<Shell> mockedShell;
-  private MockedStatic<System> mockedSystem;
   private MockedStatic<LoginContext> mockedLoginContext;
   private MockedStatic<Configuration> mockedConfiguration;
-  private final static String CONTEXT_NAME = "Uberwald"; 
+  private MockedConstruction<LoginContext> mockedLoginContextCons;
+  private final static String CONTEXT_NAME = "Uberwald";
   
   private HashedWheelTimer timer;
   private Config config;
@@ -86,60 +85,89 @@ public class TestLogin {
   private KerberosPrincipal server;
   private Date start_time;
   private Date end_time;
+  // Captured real "now" at test setup. Mockito (inline maker) cannot mock
+  // System.currentTimeMillis(), so instead of pinning the clock we anchor the
+  // ticket start/end times relative to the real clock to preserve each test's
+  // intent.
+  private long now;
 
   @SuppressWarnings("unchecked")
   @Before
   public void before() throws Exception {
-    try (MockedConstruction<LoginContext> mockLoginContext = Mockito.mockConstruction(LoginContext.class)) {
-      mockedShell = Mockito.mockStatic(Shell.class);
-      mockedSystem = Mockito.mockStatic(System.class);
-      mockedLoginContext = Mockito.mockStatic(LoginContext.class);
-      mockedConfiguration = Mockito.mockStatic(Configuration.class);
-      Field current_loginField = Login.class.getClass().getDeclaredField("current_login");
-      current_loginField.setAccessible(true);
-      current_loginField.set(Login.class, (Login)null);
+    mockedShell = Mockito.mockStatic(Shell.class);
+    mockedLoginContext = Mockito.mockStatic(LoginContext.class);
+    mockedConfiguration = Mockito.mockStatic(Configuration.class);
+    Field current_loginField = Login.class.getDeclaredField("current_login");
+    current_loginField.setAccessible(true);
+    current_loginField.set(null, (Login)null);
 
-      start_time = new Date(1388534400000L);
-      end_time = new Date(1388538000000L);
+    // Ticket started one minute ago and lasts one hour, so "now" sits one
+    // minute into a one hour ticket (mirrors the original fixed timestamps).
+    now = System.currentTimeMillis();
+    start_time = new Date(now - 60000L);
+    end_time = new Date(now + 3540000L);
 
-      config = new Config();
-      timer = mock(HashedWheelTimer.class);
-      callback = mock(CallbackHandler.class);
-      app_config_entry = mock(AppConfigurationEntry.class);
-      app_config = new AppConfigurationEntry[]{app_config_entry};
-      app_config_options = new HashMap<String, Object>(2);
-      app_config_options.put("useTicketCache", "true");
-      app_config_options.put("principal", "Vetinari");
-      login_context = mock(LoginContext.class);
-      subject = mock(Subject.class);
-      ticket = Mockito.mock(KerberosTicket.class);
-      server = mock(KerberosPrincipal.class);
+    config = new Config();
+    timer = mock(HashedWheelTimer.class);
+    callback = mock(CallbackHandler.class);
+    app_config_entry = mock(AppConfigurationEntry.class);
+    app_config = new AppConfigurationEntry[]{app_config_entry};
+    app_config_options = new HashMap<String, Object>(2);
+    app_config_options.put("useTicketCache", "true");
+    app_config_options.put("principal", "Vetinari");
+    login_context = mock(LoginContext.class);
+    subject = mock(Subject.class);
+    ticket = Mockito.mock(KerberosTicket.class);
+    server = mock(KerberosPrincipal.class);
 
-      final Configuration app_conf = mock(Configuration.class);
-      when(app_conf.getAppConfigurationEntry(anyString())).thenReturn(app_config);
-      mockedConfiguration.when(Configuration::getConfiguration).thenReturn(app_conf);
-      when(login_context.getSubject()).thenReturn(subject);
+    // The production code constructs LoginContext instances internally (in the
+    // ctor and on reLogin). Route every constructed instance's behavior through
+    // the login_context field mock so the existing verify(login_context, ...)
+    // and doThrow(...).when(login_context).login() expectations keep working.
+    mockedLoginContextCons = Mockito.mockConstruction(LoginContext.class,
+        (m, ctx) -> {
+          doAnswer(invocation -> {
+            login_context.login();
+            return null;
+          }).when(m).login();
+          doAnswer(invocation -> {
+            login_context.logout();
+            return null;
+          }).when(m).logout();
+          when(m.getSubject()).thenAnswer(invocation -> login_context.getSubject());
+        });
 
-      tickets = new HashSet<KerberosTicket>();
-      tickets.add(ticket);
-      when(subject.getPrivateCredentials(any(Class.class))).thenReturn(tickets);
+    final Configuration app_conf = mock(Configuration.class);
+    when(app_conf.getAppConfigurationEntry(anyString())).thenReturn(app_config);
+    mockedConfiguration.when(Configuration::getConfiguration).thenReturn(app_conf);
+    when(login_context.getSubject()).thenReturn(subject);
 
-      when(ticket.getServer()).thenReturn(server);
-      when(ticket.getStartTime()).thenReturn(start_time);
-      when(ticket.getEndTime()).thenReturn(end_time);
+    tickets = new HashSet<KerberosTicket>();
+    tickets.add(ticket);
+    when(subject.getPrivateCredentials(any(Class.class))).thenReturn(tickets);
 
-      when(server.getName()).thenReturn("krbtgt/Lancre@Lancre");
-      when(server.getRealm()).thenReturn("Lancre");
-      mockedSystem.when(System::currentTimeMillis).thenReturn(1388534460000L);
-    }
+    when(ticket.getServer()).thenReturn(server);
+    when(ticket.getStartTime()).thenReturn(start_time);
+    when(ticket.getEndTime()).thenReturn(end_time);
+
+    when(server.getName()).thenReturn("krbtgt/Lancre@Lancre");
+    when(server.getRealm()).thenReturn("Lancre");
   }
 
   @After
   public void tearDownStaticMocks() {
-    mockedConfiguration.closeOnDemand();
-    mockedLoginContext.closeOnDemand();
-    mockedSystem.closeOnDemand();
-    mockedShell.closeOnDemand();
+    if (mockedLoginContextCons != null) {
+      mockedLoginContextCons.close();
+    }
+    if (mockedConfiguration != null) {
+      mockedConfiguration.close();
+    }
+    if (mockedLoginContext != null) {
+      mockedLoginContext.close();
+    }
+    if (mockedShell != null) {
+      mockedShell.close();
+    }
   }
   
   @Test
@@ -225,15 +253,17 @@ public class TestLogin {
   @Test
   public void getRefreshPastExpiration() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    mockedSystem.when(System::currentTimeMillis).thenReturn(1388538060000L);
+    // Move the ticket's expiration into the past relative to the real clock.
+    end_time.setTime(now - 60000L);
     final long delay = (Long)Whitebox.invokeMethod(login, "getRefreshDelay", ticket);
     assertEquals(Login.MIN_TIME_BEFORE_RELOGIN, delay);
   }
-  
+
   @Test
   public void getRefreshWithinMinTime() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    mockedSystem.when(System::currentTimeMillis).thenReturn(1388537942000L);
+    // Ticket expires within MIN_TIME_BEFORE_RELOGIN of the real clock.
+    end_time.setTime(now + 58000L);
     final long delay = (Long)Whitebox.invokeMethod(login, "getRefreshDelay", ticket);
     assertEquals(0, delay);
   }
@@ -243,25 +273,26 @@ public class TestLogin {
     // I guess this prevents possible dos attacks if someone set the lifetime to
     // be less than a minute
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    start_time.setTime(1388537942000L);
+    // Ticket lifetime shorter than MIN_TIME_BEFORE_RELOGIN.
+    start_time.setTime(end_time.getTime() - 58000L);
     final long delay = (Long)Whitebox.invokeMethod(login, "getRefreshDelay", ticket);
     assertEquals(Login.MIN_TIME_BEFORE_RELOGIN, delay);
   }
-  
+
   @Test
   public void getRefreshFlippedTicketTimes() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
     // Friends don't let friend's KDC issue funky tickets like this
-    end_time.setTime(1388534400000L);
-    start_time.setTime(1388538000000L);
+    end_time.setTime(now - 3600000L);
+    start_time.setTime(now);
     final long delay = (Long)Whitebox.invokeMethod(login, "getRefreshDelay", ticket);
     assertEquals(Login.MIN_TIME_BEFORE_RELOGIN, delay);
   }
-  
+
   @Test
   public void getRefreshSameTicketTimes() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
-    end_time.setTime(1388534400000L);
+    end_time.setTime(start_time.getTime());
     final long delay = (Long)Whitebox.invokeMethod(login, "getRefreshDelay", ticket);
     assertEquals(Login.MIN_TIME_BEFORE_RELOGIN, delay);
   }
@@ -302,8 +333,7 @@ public class TestLogin {
     Method refreshTicketCacheMethod = login.getClass().getDeclaredMethod("refreshTicketCache");
     refreshTicketCacheMethod.setAccessible(true);
     refreshTicketCacheMethod.invoke(login);
-    PowerMockito.verifyStatic(times(1));
-    Shell.execCommand("/usr/bin/kinit", "-R");
+    mockedShell.verify(() -> Shell.execCommand("/usr/bin/kinit", "-R"), times(1));
   }
 
   @Test
@@ -314,8 +344,7 @@ public class TestLogin {
     Method refreshTicketCacheMethod = login.getClass().getDeclaredMethod("refreshTicketCache");
     refreshTicketCacheMethod.setAccessible(true);
     refreshTicketCacheMethod.invoke(login);
-    PowerMockito.verifyStatic(times(1));
-    Shell.execCommand("/usr/local/bin/kinit", "-R");
+    mockedShell.verify(() -> Shell.execCommand("/usr/local/bin/kinit", "-R"), times(1));
   }
 
   @Test(expected = RuntimeException.class)
@@ -323,9 +352,7 @@ public class TestLogin {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
     mockedShell.when(() -> Shell.execCommand(anyString(), anyString()))
         .thenThrow(new IOException("Boo!"));
-    Method refreshTicketCacheMethod = login.getClass().getDeclaredMethod("refreshTicketCache");
-    refreshTicketCacheMethod.setAccessible(true);
-    refreshTicketCacheMethod.invoke(login);
+    Whitebox.invokeMethod(login, "refreshTicketCache");
   }
 
   @Test(expected = RuntimeException.class)
@@ -345,8 +372,7 @@ public class TestLogin {
     Method refreshTicketCacheMethod = login.getClass().getDeclaredMethod("refreshTicketCache");
     refreshTicketCacheMethod.setAccessible(true);
     refreshTicketCacheMethod.invoke(login);
-    PowerMockito.verifyStatic(times(1));
-    Shell.execCommand("/usr/bin/kinit", "-R");
+    mockedShell.verify(() -> Shell.execCommand("/usr/bin/kinit", "-R"), times(1));
   }
 
   @Test
@@ -377,18 +403,14 @@ public class TestLogin {
     Field login_contextField = login.getClass().getDeclaredField("login_context");
     login_contextField.setAccessible(true);
     login_contextField.set(login, (LoginContext)null);
-    Method reLoginMethod = login.getClass().getDeclaredMethod("reLogin");
-    reLoginMethod.setAccessible(true);
-    reLoginMethod.invoke(login);
+    Whitebox.invokeMethod(login, "reLogin");
   }
 
   @Test(expected = LoginException.class)
   public void reLoginLoginFailed() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
     doThrow(new LoginException("Boo!")).when(login_context).login();
-    Method reLoginMethod = login.getClass().getDeclaredMethod("reLogin");
-    reLoginMethod.setAccessible(true);
-    reLoginMethod.invoke(login);
+    Whitebox.invokeMethod(login, "reLogin");
   }
 
   @Test
@@ -400,8 +422,7 @@ public class TestLogin {
         eq(TimeUnit.MILLISECONDS));
     verify(login_context, times(1)).logout();
     verify(login_context, times(2)).login();
-    PowerMockito.verifyStatic(never());
-    Shell.execCommand("/usr/bin/kinit", "-R");
+    mockedShell.verify(() -> Shell.execCommand("/usr/bin/kinit", "-R"), never());
   }
 
   @Test
@@ -416,8 +437,7 @@ public class TestLogin {
         eq(TimeUnit.MILLISECONDS));
     verify(login_context, times(1)).logout();
     verify(login_context, times(2)).login();
-    PowerMockito.verifyStatic(times(1));
-    Shell.execCommand("/usr/bin/kinit", "-R");
+    mockedShell.verify(() -> Shell.execCommand("/usr/bin/kinit", "-R"), times(1));
   }
 
   @Test
@@ -435,10 +455,9 @@ public class TestLogin {
         eq(Login.MIN_TIME_BEFORE_RELOGIN), eq(TimeUnit.MILLISECONDS));
     verify(login_context, never()).logout();
     verify(login_context, times(1)).login();
-    PowerMockito.verifyStatic(never());
-    Shell.execCommand("/usr/bin/kinit", "-R");
+    mockedShell.verify(() -> Shell.execCommand("/usr/bin/kinit", "-R"), never());
   }
-  
+
   @Test
   public void ticketRenewalTaskException() throws Exception {
     final Login login = new Login(config, timer, CONTEXT_NAME, callback);
@@ -452,7 +471,6 @@ public class TestLogin {
         eq(Login.MIN_TIME_BEFORE_RELOGIN), eq(TimeUnit.MILLISECONDS));
     verify(login_context, times(1)).logout();
     verify(login_context, times(2)).login();
-    PowerMockito.verifyStatic(never());
-    Shell.execCommand("/usr/bin/kinit", "-R");
+    mockedShell.verify(() -> Shell.execCommand("/usr/bin/kinit", "-R"), never());
   }
 }

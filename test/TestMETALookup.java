@@ -33,14 +33,10 @@ import java.util.Comparator;
 
 import org.junit.Test;
 
-import org.powermock.core.classloader.annotations.PrepareForTest;
-
 /**
  * Unit tests for META lookups and associated regressions.
  */
-
-@PrepareForTest
-final class TestMETALookup {
+public final class TestMETALookup {
 
   private static final Comparator<byte[]> cmp = RegionInfo.REGION_NAME_CMP;
 

@@ -29,10 +29,8 @@ package org.hbase.async;
 import static org.junit.Assert.*;
 
 import static org.mockito.Mockito.*;
-import static org.powermock.api.mockito.PowerMockito.verifyPrivate;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.ConcurrentSkipListMap;
@@ -40,27 +38,37 @@ import java.util.concurrent.ConcurrentSkipListMap;
 
 import org.jboss.netty.util.HashedWheelTimer;
 import org.jboss.netty.util.TimerTask;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
 import org.mockito.ArgumentMatcher;
+import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
-import org.powermock.api.support.membermodification.MemberMatcher;
-import org.powermock.api.support.membermodification.MemberModifier;
 import org.powermock.reflect.Whitebox;
 
 import com.stumbleupon.async.Deferred;
 
-final class TestNSREs extends BaseTestHBaseClient {
+public final class TestNSREs extends BaseTestHBaseClient {
   private GetRequest[] dummy_gets;
   private GetRequest trigger;
   private Counter num_nsres;
   private ConcurrentSkipListMap<byte[], ArrayList<HBaseRpc>> got_nsre;
   private ArrayList<KeyValue> row;
-  
+  /** Static mock of GetRequest, held open by MockProbe() for the test. */
+  private MockedStatic<GetRequest> mockedGetRequest;
+
+  @After
+  public void afterNSRE() {
+    if (mockedGetRequest != null) {
+      mockedGetRequest.close();
+      mockedGetRequest = null;
+    }
+  }
+
   @Before
   public void beforeNSRE() throws Exception {
     row = new ArrayList<KeyValue>(1);
@@ -68,6 +76,16 @@ final class TestNSREs extends BaseTestHBaseClient {
     num_nsres = Whitebox.getInternalState(client, "num_nsres");
     num_nsre_rpcs = Whitebox.getInternalState(client, "num_nsre_rpcs");
     got_nsre = Whitebox.getInternalState(client, "got_nsre");
+    // The base class mock-constructs HashedWheelTimer, so client.timer is an
+    // inert mock whose newTimeout() never runs the scheduled task.  The NSRE
+    // probe retry is driven through that timer, so inject the immediate-firing
+    // FakeTimer for the tests (simpleNSRE/doubleNSRE) that rely on the probe
+    // actually being scheduled.  Tests that need different timer behaviour
+    // (a mock timer to suppress retries, FakeTaskTimer, or a fresh FakeTimer in
+    // setupMultiNSRE) overwrite this field themselves after this method runs.
+    Field timerField = client.getClass().getDeclaredField("timer");
+    timerField.setAccessible(true);
+    timerField.set(client, timer);
   }
   
   @Test
@@ -114,8 +132,7 @@ final class TestNSREs extends BaseTestHBaseClient {
       .thenAnswer(newDeferred(metaRow()));
     // This is the client where the region moved to after the NSRE.
     final RegionClient newregionclient = mock(RegionClient.class);
-    final Method newClient = MemberMatcher.method(HBaseClient.class, "newClient");
-    MemberModifier.stub(newClient).toReturn(newregionclient);
+    doReturn(newregionclient).when(client).newClient(anyString(), anyInt());
     when(newregionclient.isAlive()).thenReturn(true);
     // Answer the "exists" probe we use to check if the NSRE is still there.
     doAnswer(new Answer<Object>() {
@@ -164,8 +181,7 @@ final class TestNSREs extends BaseTestHBaseClient {
       .thenAnswer(newDeferred(metaRow(KEY, HBaseClient.EMPTY_ARRAY)));  // [2]
     // This is the client of the daughter region.
     final RegionClient newregionclient = mock(RegionClient.class);
-    final Method newClient = MemberMatcher.method(HBaseClient.class, "newClient");
-    MemberModifier.stub(newClient).toReturn(newregionclient);
+    doReturn(newregionclient).when(client).newClient(anyString(), anyInt());
     when(newregionclient.isAlive()).thenReturn(true);
     // Make the exist probe fail with another NSRE.
     doAnswer(new Answer<Object>() {
@@ -268,9 +284,7 @@ final class TestNSREs extends BaseTestHBaseClient {
         .thenAnswer(newDeferred(metaRow()));
     // This will make sure that whenever region lookup happens the same
     // region client, on which we have stubbed the calls
-    final Method newClient = MemberMatcher.method(HBaseClient.class,
-        "newClient");
-    MemberModifier.stub(newClient).toReturn(regionclient);
+    doReturn(regionclient).when(client).newClient(anyString(), anyInt());
 
 
     // Now we write the NSRE logic for the probe and hence we defined the
@@ -411,9 +425,7 @@ final class TestNSREs extends BaseTestHBaseClient {
         .thenAnswer(newDeferred(metaRow()));
     // This will make sure that whenever region lookup happens the same
     // region client, on which we have stubbed the calls.
-    final Method newClient = MemberMatcher.method(HBaseClient.class,
-        "newClient");
-    MemberModifier.stub(newClient).toReturn(regionclient);
+    doReturn(regionclient).when(client).newClient(anyString(), anyInt());
 
     // behaviour for the triggerGet
     doAnswer(new Answer<Object>() {
@@ -574,9 +586,9 @@ final class TestNSREs extends BaseTestHBaseClient {
 //      attempt++;
 //    }
     
-    verifyPrivate(client, times(55)).invoke("invalidateRegionCache",
+    verify(client, times(55)).invalidateRegionCache(
         region.name(), false, null);
-    verifyPrivate(client, times(119)).invoke("sendRpcToRegion", (HBaseRpc)any());
+    verify(client, times(119)).sendRpcToRegion((HBaseRpc)any());
     verify(client, times(55)).handleNSRE((HBaseRpc)any(), (byte[])any(),
         (RecoverableException)any(), (String)any());
     Field got_nsreField = client.getClass().getDeclaredField("got_nsre");
@@ -618,9 +630,9 @@ final class TestNSREs extends BaseTestHBaseClient {
       assertEquals(last, task.getValue());
     }
 
-    verifyPrivate(client, times(2)).invoke("invalidateRegionCache",
+    verify(client, times(2)).invalidateRegionCache(
         region.name(), false, null);
-    verifyPrivate(client, times(10)).invoke("sendRpcToRegion", (HBaseRpc)any());
+    verify(client, times(10)).sendRpcToRegion((HBaseRpc)any());
     verify(client, times(2)).handleNSRE((HBaseRpc)any(), (byte[])any(),
         (RecoverableException)any(), (String)any());
     Field got_nsreField = client.getClass().getDeclaredField("got_nsre");
@@ -678,9 +690,9 @@ final class TestNSREs extends BaseTestHBaseClient {
 //      }
 //    }
     
-    verifyPrivate(client, times(36)).invoke("invalidateRegionCache",
+    verify(client, times(36)).invalidateRegionCache(
         region.name(), false, null);
-    verifyPrivate(client, times(84)).invoke("sendRpcToRegion", (HBaseRpc)any());
+    verify(client, times(84)).sendRpcToRegion((HBaseRpc)any());
     verify(client, times(36)).handleNSRE((HBaseRpc)any(), (byte[])any(),
         (RecoverableException)any(), (String)any());
     Field got_nsreField = client.getClass().getDeclaredField("got_nsre");
@@ -713,9 +725,9 @@ final class TestNSREs extends BaseTestHBaseClient {
     client.handleNSRE(get, region.name(), null,
         REMOTE_ADDRESS);
 
-    verifyPrivate(client, times(1)).invoke("invalidateRegionCache",
+    verify(client, times(1)).invalidateRegionCache(
         region.name(), false, null);
-    verifyPrivate(client, times(3)).invoke("sendRpcToRegion", (HBaseRpc)any());
+    verify(client, times(3)).sendRpcToRegion((HBaseRpc)any());
     verify(client, times(1)).handleNSRE((HBaseRpc)any(), (byte[])any(),
         (RecoverableException)any(),
         eq(REMOTE_ADDRESS));
@@ -740,9 +752,9 @@ final class TestNSREs extends BaseTestHBaseClient {
         new NotServingRegionException("Fail", get),
         REMOTE_ADDRESS);
 
-    verifyPrivate(client, times(1)).invoke("invalidateRegionCache",
+    verify(client, times(1)).invalidateRegionCache(
         region.name(), true, "seems to be splitting or closing it.");
-    verifyPrivate(client, never()).invoke("sendRpcToRegion", (HBaseRpc)any());
+    verify(client, never()).sendRpcToRegion((HBaseRpc)any());
     assertEquals(1, got_nsre.size());
     assertEquals(1, num_nsres.get());
     assertEquals(1, num_nsre_rpcs.get());
@@ -774,9 +786,9 @@ final class TestNSREs extends BaseTestHBaseClient {
         new NotServingRegionException("Fail", get2),
         REMOTE_ADDRESS);
 
-    verifyPrivate(client, times(1)).invoke("invalidateRegionCache",
+    verify(client, times(1)).invalidateRegionCache(
         region.name(), true, "seems to be splitting or closing it.");
-    verifyPrivate(client, never()).invoke("sendRpcToRegion", (HBaseRpc)any());
+    verify(client, never()).sendRpcToRegion((HBaseRpc)any());
     assertEquals(1, got_nsre.size());
     assertEquals(1, num_nsres.get());
     assertEquals(2, num_nsre_rpcs.get());
@@ -817,9 +829,9 @@ final class TestNSREs extends BaseTestHBaseClient {
         new NotServingRegionException("Fail", get3),
         REMOTE_ADDRESS);
 
-    verifyPrivate(client, times(1)).invoke("invalidateRegionCache",
+    verify(client, times(1)).invalidateRegionCache(
         region.name(), true, "seems to be splitting or closing it.");
-    verifyPrivate(client, never()).invoke("sendRpcToRegion", (HBaseRpc)any());
+    verify(client, never()).sendRpcToRegion((HBaseRpc)any());
     assertEquals(1, got_nsre.size());
     assertEquals(1, num_nsres.get());
     assertEquals(3, num_nsre_rpcs.get());
@@ -862,9 +874,9 @@ final class TestNSREs extends BaseTestHBaseClient {
         new NotServingRegionException("Fail", get3),
         REMOTE_ADDRESS);
 
-    verifyPrivate(client, times(1)).invoke("invalidateRegionCache",
+    verify(client, times(1)).invalidateRegionCache(
         region.name(), true, "seems to be splitting or closing it.");
-    verifyPrivate(client, never()).invoke("sendRpcToRegion", (HBaseRpc)any());
+    verify(client, never()).sendRpcToRegion((HBaseRpc)any());
     assertEquals(1, got_nsre.size());
     assertEquals(1, num_nsres.get());
     assertEquals(3, num_nsre_rpcs.get());
@@ -924,9 +936,9 @@ final class TestNSREs extends BaseTestHBaseClient {
         new NotServingRegionException("Fail", probe),
         REMOTE_ADDRESS);
 
-    verifyPrivate(client, times(1)).invoke("invalidateRegionCache",
+    verify(client, times(1)).invalidateRegionCache(
         region.name(), true, "seems to be splitting or closing it.");
-    verifyPrivate(client, never()).invoke("sendRpcToRegion", (HBaseRpc)any());
+    verify(client, never()).sendRpcToRegion((HBaseRpc)any());
     assertEquals(1, got_nsre.size());
     assertEquals(2, num_nsres.get());
     assertEquals(3, num_nsre_rpcs.get());
@@ -974,9 +986,9 @@ final class TestNSREs extends BaseTestHBaseClient {
     assertNotNull(ex.getCause());
     assertTrue(ex.getCause() instanceof NotServingRegionException);
 
-    verifyPrivate(client, times(1)).invoke("invalidateRegionCache",
+    verify(client, times(1)).invalidateRegionCache(
         region.name(), true, "seems to be splitting or closing it.");
-    verifyPrivate(client, never()).invoke("sendRpcToRegion", (HBaseRpc)any());
+    verify(client, never()).sendRpcToRegion((HBaseRpc)any());
     assertEquals(1, got_nsre.size());
     assertEquals(1, num_nsres.get());
   }
@@ -1019,9 +1031,9 @@ final class TestNSREs extends BaseTestHBaseClient {
     assertNotNull(ex.getCause());
     assertTrue(ex.getCause() instanceof NotServingRegionException);
 
-    verifyPrivate(client, never()).invoke("invalidateRegionCache",
+    verify(client, never()).invalidateRegionCache(
         region.name(), true, "seems to be splitting or closing it.");
-    verifyPrivate(client, never()).invoke("sendRpcToRegion", (HBaseRpc)any());
+    verify(client, never()).sendRpcToRegion((HBaseRpc)any());
     assertEquals(1, got_nsre.size());
     assertEquals(0, num_nsres.get());
   }
@@ -1045,9 +1057,7 @@ final class TestNSREs extends BaseTestHBaseClient {
     when(rootclient.getClosestRowBefore((RegionInfo)any(), anyBytes(), anyBytes(),
         anyBytes()))
         .thenAnswer(newDeferred(metaRow()));
-    final Method newClient = MemberMatcher.method(HBaseClient.class,
-        "newClient");
-    MemberModifier.stub(newClient).toReturn(regionclient);
+    doReturn(regionclient).when(client).newClient(anyString(), anyInt());
 
     short id = 0;
     dummy_gets = new GetRequest[]{
@@ -1131,10 +1141,21 @@ final class TestNSREs extends BaseTestHBaseClient {
    * @throws Exception If mocking failed.
    */
   private HBaseRpc MockProbe() throws Exception {
-    final byte[] probe_key = (byte[])Whitebox.invokeMethod(HBaseClient.class, 
+    final byte[] probe_key = (byte[])Whitebox.invokeMethod(HBaseClient.class,
         "probeKey", KEY);
-    final HBaseRpc exists = GetRequest.exists(TABLE, probe_key);
-    Mockito.when(GetRequest.exists(TABLE, probe_key)).thenReturn(exists);
+    // Build a controlled mock probe so handleNSRE doesn't create a real
+    // GetRequest whose Deferred never completes (which would hang the
+    // FakeTimer's immediate-retry loop forever).
+    final HBaseRpc exists = mock(HBaseRpc.class);
+    exists.attempt = 0;
+    when(exists.getDeferred()).thenReturn(new Deferred<Object>());
+    when(exists.toString()).thenReturn("MockProbe");
+    // Stub the static factory so production code obtains our controlled mock.
+    // Keep all other GetRequest statics real (e.g. probeKey paths elsewhere).
+    mockedGetRequest = Mockito.mockStatic(GetRequest.class,
+        Mockito.CALLS_REAL_METHODS);
+    mockedGetRequest.when(() -> GetRequest.exists(eq(TABLE), eq(probe_key)))
+        .thenReturn(exists);
     return exists;
   }
 }

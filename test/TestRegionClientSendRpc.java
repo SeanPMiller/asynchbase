@@ -42,11 +42,10 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-
-import org.powermock.api.mockito.PowerMockito;
 
 import com.stumbleupon.async.Deferred;
 import com.stumbleupon.async.TimeoutException;
@@ -65,7 +64,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
 
   @After
   public void tearDownStaticMocks() {
-    mockedChannels.closeOnDemand();
+    if (mockedChannels != null) mockedChannels.close();
   }
   
   @Test (expected = NullPointerException.class)
@@ -91,8 +90,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
     MultiAction batched_rpcs = (MultiAction)batched_rpcsField.get(region_client);
     assertNotNull(batched_rpcs);
     assertEquals(1, batched_rpcs.size());
-    PowerMockito.verifyStatic(never());
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), never());
     verify(hbase_client, never()).sendRpcToRegion(put);
     assertEquals(0, rpcs_inflight.size());
     assertEquals(0, region_client.stats().rpcsSent());
@@ -118,8 +116,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
     batched_rpcsField.setAccessible(true);
     MultiAction batched_rpcs = (MultiAction)batched_rpcsField.get(region_client);
     assertNull(batched_rpcs);
-    PowerMockito.verifyStatic(times(1));
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), times(1));
     verify(hbase_client, never()).sendRpcToRegion(put);
     assertEquals(1, rpcs_inflight.size());
     assertEquals(1, region_client.stats().rpcsSent());
@@ -148,8 +145,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
     batched_rpcsField.setAccessible(true);
     MultiAction batched_rpcs = (MultiAction)batched_rpcsField.get(region_client);
     assertNull(batched_rpcs);
-    PowerMockito.verifyStatic(times(1));
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), times(1));
     verify(hbase_client, never()).sendRpcToRegion(put);
     assertEquals(1, rpcs_inflight.size());
     assertEquals(1, region_client.stats().rpcsSent());
@@ -180,8 +176,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
     MultiAction batched_rpcs = (MultiAction)batched_rpcsField.get(region_client);
     assertNotNull(batched_rpcs);
     assertEquals(1, batched_rpcs.size());
-    PowerMockito.verifyStatic(never());
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), never());
     verify(hbase_client, never()).sendRpcToRegion(append);
     assertEquals(0, rpcs_inflight.size());
     assertEquals(0, region_client.stats().rpcsSent());
@@ -208,8 +203,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
     batched_rpcsField.setAccessible(true);
     MultiAction batched_rpcs = (MultiAction)batched_rpcsField.get(region_client);
     assertNull(batched_rpcs);
-    PowerMockito.verifyStatic(times(1));
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), times(1));
     verify(hbase_client, never()).sendRpcToRegion(append);
     assertEquals(1, rpcs_inflight.size());
     assertEquals(1, region_client.stats().rpcsSent());
@@ -239,8 +233,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
     batched_rpcsField.setAccessible(true);
     MultiAction batched_rpcs = (MultiAction)batched_rpcsField.get(region_client);
     assertNull(batched_rpcs);
-    PowerMockito.verifyStatic(times(1));
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), times(1));
     verify(hbase_client, never()).sendRpcToRegion(append);
     assertEquals(1, rpcs_inflight.size());
     assertEquals(1, region_client.stats().rpcsSent());
@@ -260,8 +253,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
     
     region_client.sendRpc(get);
     
-    PowerMockito.verifyStatic(times(1));
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), times(1));
     verify(hbase_client, never()).sendRpcToRegion(get);
     assertEquals(1, region_client.stats().rpcsSent());
     assertEquals(0, region_client.stats().pendingBatchedRPCs());
@@ -277,8 +269,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
     
     region_client.sendRpc(get);
     
-    PowerMockito.verifyStatic(times(1));
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), times(1));
     verify(hbase_client, never()).sendRpcToRegion(get);
     assertEquals(1, rpcs_inflight.size());
     assertEquals(1, region_client.stats().rpcsSent());
@@ -297,8 +288,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
     
     region_client.sendRpc(get);
     
-    PowerMockito.verifyStatic(times(1));
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), times(1));
     verify(hbase_client, never()).sendRpcToRegion(get);
     assertEquals(1, rpcs_inflight.size());
     assertEquals(1, region_client.stats().rpcsSent());
@@ -326,8 +316,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
     
     region_client.sendRpc(get);
 
-    PowerMockito.verifyStatic(times(1));
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), times(1));
     verify(hbase_client, never()).sendRpcToRegion(get);
     assertEquals(1, region_client.stats().rpcsSent());
     assertEquals(0, region_client.stats().writesBlocked());
@@ -347,8 +336,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
 
     region_client.sendRpc(get);
 
-    PowerMockito.verifyStatic(never());
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), never());
     verify(hbase_client, never()).sendRpcToRegion(get);
     assertEquals(0, region_client.stats().rpcsSent());
     assertEquals(1, region_client.stats().writesBlocked());
@@ -385,8 +373,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
       ex = e;
     }
     assertTrue(ex instanceof TimeoutException);
-    PowerMockito.verifyStatic(times(1));
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), times(1));
     verify(hbase_client, never()).sendRpcToRegion(ma);
     assertEquals(1, region_client.stats().rpcsSent());
     assertEquals(0, region_client.stats().pendingBatchedRPCs());
@@ -415,8 +402,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
       ex = e;
     }
     assertTrue(ex instanceof TimeoutException);
-    PowerMockito.verifyStatic(times(1));
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), times(1));
     verify(hbase_client, never()).sendRpcToRegion(ma);
     assertEquals(1, region_client.stats().rpcsSent());
     assertEquals(0, region_client.stats().pendingBatchedRPCs());
@@ -442,8 +428,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
       ex = e;
     }
     assertTrue(ex instanceof NullPointerException);
-    PowerMockito.verifyStatic(never());
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), never());
     verify(hbase_client, never()).sendRpcToRegion(ma);
     assertEquals(0, region_client.stats().rpcsSent());
     assertEquals(0, region_client.stats().pendingBatchedRPCs());
@@ -469,8 +454,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
       ex = e;
     }
     assertTrue(ex instanceof TimeoutException);
-    PowerMockito.verifyStatic(never());
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), never());
     verify(hbase_client, never()).sendRpcToRegion(put);
     assertEquals(0, region_client.stats().rpcsSent());
     assertEquals(0, region_client.stats().pendingBatchedRPCs());
@@ -498,8 +482,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
       ex = e;
     }
     assertTrue(ex instanceof TimeoutException);
-    PowerMockito.verifyStatic(never());
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), never());
     verify(hbase_client, times(1)).sendRpcToRegion(put);
     assertEquals(0, region_client.stats().rpcsSent());
     assertEquals(0, region_client.stats().pendingBatchedRPCs());
@@ -526,8 +509,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
       ex = e;
     }
     assertTrue(ex instanceof ConnectionResetException);
-    PowerMockito.verifyStatic(never());
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), never());
     verify(hbase_client, never()).sendRpcToRegion(put);
     assertEquals(0, region_client.stats().rpcsSent());
     assertEquals(0, region_client.stats().pendingBatchedRPCs());
@@ -556,8 +538,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
       ex = e;
     }
     assertTrue(ex instanceof ConnectionResetException);
-    PowerMockito.verifyStatic(never());
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), never());
     verify(hbase_client, never()).sendRpcToRegion(put);
     assertEquals(0, region_client.stats().rpcsSent());
     assertEquals(0, region_client.stats().pendingBatchedRPCs());
@@ -584,8 +565,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
     
     region_client.sendRpc(get);
 
-    PowerMockito.verifyStatic(times(1));
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), times(1));
     verify(hbase_client, never()).sendRpcToRegion(get);
     assertEquals(1, region_client.stats().rpcsSent());
     assertEquals(0, region_client.stats().pendingBatchedRPCs());
@@ -621,8 +601,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
     batched_rpcsField.setAccessible(true);
     MultiAction batched_rpcs = (MultiAction)batched_rpcsField.get(region_client);
     assertNull(batched_rpcs);
-    PowerMockito.verifyStatic(never());
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), never());
     verify(hbase_client, never()).sendRpcToRegion(put);
     assertEquals(0, rpcs_inflight.size());
     assertEquals(0, region_client.stats().rpcsSent());
@@ -655,8 +634,7 @@ public class TestRegionClientSendRpc extends BaseTestRegionClient {
     batched_rpcsField.setAccessible(true);
     MultiAction batched_rpcs = (MultiAction)batched_rpcsField.get(region_client);
     assertNull(batched_rpcs);
-    PowerMockito.verifyStatic(never());
-    Channels.write((Channel)any(), (ChannelBuffer)any());
+    mockedChannels.verify(() -> Channels.write((Channel)any(), (ChannelBuffer)any()), never());
     verify(hbase_client, never()).sendRpcToRegion(put);
     assertEquals(1, rpcs_inflight.size());
     assertEquals(0, region_client.stats().rpcsSent());
