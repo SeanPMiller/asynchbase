@@ -123,7 +123,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-javadoc-plugin</artifactId>
-        <version>2.8.1</version>
+        <version>3.12.0</version>
         <executions>
           <execution>
             <id>attach-javadocs</id>
@@ -134,7 +134,13 @@
         </executions>
         <configuration>
           <quiet>true</quiet>
-          <validateLinks>true</validateLinks>
+          <!-- The codebase predates doclint and has ~90 missing @param/@return
+               tags, empty <p> tags, legacy <H1> headings and a couple of stale
+               {@link}s.  Rather than rewrite every doc comment, turn off
+               doclint so `mvn install` can build the javadoc jar.  (doclint is
+               on by default on JDK 8u20+ and stricter on each newer JDK, so
+               this is also what keeps the javadoc jar building on JDK 9-21+.) -->
+          <doclint>none</doclint>
           <bottom>
             Copyright &#169; {inceptionYear}-{currentYear},
             ${project.organization.name}
