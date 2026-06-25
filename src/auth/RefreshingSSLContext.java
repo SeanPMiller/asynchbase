@@ -28,12 +28,12 @@ package org.hbase.async.auth;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.StringReader;
-import java.math.BigInteger;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.KeyManagementException;
@@ -48,7 +48,6 @@ import java.security.cert.X509Certificate;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
-import java.security.spec.RSAPrivateKeySpec;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -71,8 +70,6 @@ import com.google.common.hash.HashCode;
 import com.google.common.hash.Hashing;
 import com.google.common.io.Files;
 
-import sun.security.util.DerInputStream;
-import sun.security.util.DerValue;
 
 /**
  * First stab at a refreshing SSL context that watches the given params for
@@ -458,21 +455,75 @@ public class RefreshingSSLContext implements TimerTask {
    */
   private static RSAPrivateKey parsePKCS1Key(final String key)
       throws IOException, GeneralSecurityException {
-    final DerInputStream stream = new DerInputStream(
-        Base64.getMimeDecoder().decode(key));
-    final DerValue[] seq = stream.getSequence(0);
-
-    if (seq.length < 9) {
-      throw new GeneralSecurityException("Failed parsing the PKCS1 "
-          + "formatted key as it didn't have the right number of sequences.");
-    }
-
-    final BigInteger modulus = seq[1].getBigInteger();
-    final BigInteger private_exponent = seq[3].getBigInteger();
-    final RSAPrivateKeySpec spec = new RSAPrivateKeySpec(modulus,
-        private_exponent);
+    // Wrap the bare PKCS#1 RSAPrivateKey in a PKCS#8 PrivateKeyInfo container
+    // and let the JDK's standard KeyFactory parse it.  This avoids the
+    // JDK-internal sun.security.util.* classes (which are inaccessible on
+    // Java 16+) and any third-party dependency, and -- unlike pulling out just
+    // the modulus and private exponent -- lets the JDK parse the full key,
+    // including the CRT parameters, yielding a faster RSAPrivateCrtKey.
+    final byte[] pkcs8 =
+        wrapPkcs1InPkcs8(Base64.getMimeDecoder().decode(key));
     final KeyFactory factory = KeyFactory.getInstance("RSA");
-    return (RSAPrivateKey) factory.generatePrivate(spec);
+    return (RSAPrivateKey) factory.generatePrivate(
+        new PKCS8EncodedKeySpec(pkcs8));
+  }
+
+  /**
+   * Wraps a DER-encoded PKCS#1 {@code RSAPrivateKey} in a PKCS#8
+   * {@code PrivateKeyInfo} so it can be read by {@link PKCS8EncodedKeySpec}:
+   * <pre>
+   *   PrivateKeyInfo ::= SEQUENCE {
+   *     version              INTEGER (0),
+   *     privateKeyAlgorithm  AlgorithmIdentifier (rsaEncryption, NULL),
+   *     privateKey           OCTET STRING (the PKCS#1 bytes)
+   *   }
+   * </pre>
+   * Only the (definite) length prefixes are emitted here -- the actual key
+   * parsing/validation is left to the JDK's {@code KeyFactory}.
+   * @param pkcs1 The DER bytes of a PKCS#1 RSAPrivateKey.
+   * @return The DER bytes of an equivalent PKCS#8 PrivateKeyInfo.
+   */
+  private static byte[] wrapPkcs1InPkcs8(final byte[] pkcs1) {
+    // AlgorithmIdentifier for rsaEncryption (OID 1.2.840.113549.1.1.1) + NULL.
+    final byte[] rsa_algorithm_id = {
+        0x30, 0x0d, 0x06, 0x09, 0x2a, (byte) 0x86, 0x48, (byte) 0x86,
+        (byte) 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00 };
+    final byte[] version = { 0x02, 0x01, 0x00 };  // INTEGER 0
+
+    final ByteArrayOutputStream octet = new ByteArrayOutputStream();
+    octet.write(0x04);  // OCTET STRING
+    writeDerLength(octet, pkcs1.length);
+    octet.write(pkcs1, 0, pkcs1.length);
+
+    final ByteArrayOutputStream body = new ByteArrayOutputStream();
+    body.write(version, 0, version.length);
+    body.write(rsa_algorithm_id, 0, rsa_algorithm_id.length);
+    final byte[] octet_bytes = octet.toByteArray();
+    body.write(octet_bytes, 0, octet_bytes.length);
+
+    final byte[] body_bytes = body.toByteArray();
+    final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    out.write(0x30);  // SEQUENCE
+    writeDerLength(out, body_bytes.length);
+    out.write(body_bytes, 0, body_bytes.length);
+    return out.toByteArray();
+  }
+
+  /** Writes a DER definite length: short form (&lt;128) or long form. */
+  private static void writeDerLength(final ByteArrayOutputStream out,
+                                     final int length) {
+    if (length < 0x80) {
+      out.write(length);
+      return;
+    }
+    int num_bytes = 0;
+    for (int n = length; n > 0; n >>>= 8) {
+      num_bytes++;
+    }
+    out.write(0x80 | num_bytes);
+    for (int shift = (num_bytes - 1) * 8; shift >= 0; shift -= 8) {
+      out.write((length >>> shift) & 0xFF);
+    }
   }
 
   /**
