@@ -943,8 +943,11 @@ public class TestZKClient {
     assertNull(cb.handleRootZnode(data));
   }
   
-  // TODO - to be fixed in the source code
-  @Test (expected = ArrayIndexOutOfBoundsException.class)
+  // Regression test for the short-overflow fix: a metadata_length near its
+  // 65000 upper bound pushes the skip offset past Short.MAX_VALUE. With int
+  // offsets, the location parses correctly. Previously, shorts overflowed to
+  // a negative index and threw ArrayIndexOutOfBoundsException.
+  @Test
   public void handleRootZnode92UpperLimitofMeta() throws Exception {
     final ZKCallback cb = zk_client.new ZKCallback();
     final byte[] string = "127.0.0.1,50511,1388534400000".getBytes(CHARSET);
@@ -1241,16 +1244,28 @@ public class TestZKClient {
     verify(client).newClient("127.0.0.1", 50511);
   }
   
-  // TODO - to be fixed in the source code
-  @Test (expected = ArrayIndexOutOfBoundsException.class)
+  // Regression test for the offset overflow fix: a metadata_length at its
+  // 65000 upper bound pushes the skip offset past Short.MAX_VALUE. Now that
+  // the offset is an int the znode parses correctly; previously it overflowed
+  // a short to a negative value and threw ArrayIndexOutOfBoundsException.
+  @Test
   public void handleMetaZnodeUpperLimitofMeta() throws Exception {
     final ZKCallback cb = zk_client.new ZKCallback();
-    final byte[] string = "127.0.0.1,50511,1388534400000".getBytes(CHARSET);
-    final byte[] data = new byte[string.length + 65004];
+
+    final ServerName server = ServerName.newBuilder()
+        .setHostName("127.0.0.1").setPort(50511).build();
+    final MetaRegionServer meta_server = MetaRegionServer.newBuilder()
+          .setServer(server).build();
+    final int metadata_length = 65000;        // max accepted by handleMetaZnode
+    final int magic_offset = 1 + 4 + metadata_length;
+    final byte[] data =
+        new byte[magic_offset + 4 + meta_server.getSerializedSize()];
     data[0] = ZKCallback.MAGIC;
-    Bytes.setInt(data, 64999, 1);
-    System.arraycopy(string, 0, data, 65004, string.length);
-    
+    Bytes.setInt(data, metadata_length, 1);
+    Bytes.setInt(data, HBaseClient.PBUF_MAGIC, magic_offset);
+    System.arraycopy(meta_server.toByteArray(), 0, data, magic_offset + 4,
+        meta_server.getSerializedSize());
+
     final RegionClient rc = cb.handleMetaZnode(data);
     assertNotNull(rc);
     assertEquals("127.0.0.1:50511", rc.getRemoteAddress());

@@ -4954,8 +4954,14 @@ public final class HBaseClient {
         // where the <metadata> starts with MAGIC, then a 4 byte integer,
         // then that many bytes of meta data.
         boolean newstyle;     // True if we expect a 0.91 style location.
-        final short offset;   // Bytes to skip at the beginning of data.
-        short firstsep = -1;  // Index of the first separator (':' or ',').
+
+        // Below, we use type int (previously, short) for variables offset,
+        // firstsep, portend, n, and i. Both data.length and metadata_length
+        // can exceed Short.MAX_VALUE, which would overflow a short-valued
+        // variable.
+
+        final int offset;     // Bytes to skip at the beginning of data.
+        int firstsep = -1;    // Index of the first separator (':' or ',').
         if (data[0] == MAGIC) {
           newstyle = true;
           final int metadata_length = Bytes.getInt(data, 1);
@@ -4964,16 +4970,16 @@ public final class HBaseClient {
                       + ", invalid metadata length=" + metadata_length);
             return null;  // TODO(tsuna): Add a watch to wait until the file changes.
           }
-          offset = (short) (1 + 4 + metadata_length);
+          offset = 1 + 4 + metadata_length;
         } else {
           newstyle = false;  // Maybe true, the loop below will tell us.
           offset = 0;
         }
-        final short n = (short) data.length;
+        final int n = data.length;
         // Look for the first separator.  Skip the offset, and skip the
         // first byte, because we know the separate can only come after
         // at least one byte.
-        loop: for (short i = (short) (offset + 1); i < n; i++) {
+        loop: for (int i = offset + 1; i < n; i++) {
            switch (data[i]) {
             case ',':
               newstyle = true;
@@ -4989,11 +4995,11 @@ public final class HBaseClient {
           return null;  // TODO(tsuna): Add a watch to wait until the file changes.
         }
         final String host;
-        final short portend;  // Index past where the port number ends.
+        final int portend;    // Index past where the port number ends.
         if (newstyle) {
           host = new String(data, offset, firstsep - offset);
-          short i;
-          for (i = (short) (firstsep + 2); i < n; i++) {
+          int i;
+          for (i = firstsep + 2; i < n; i++) {
             if (data[i] == ',') {
               break;
             }
@@ -5034,7 +5040,12 @@ public final class HBaseClient {
                     + ", invalid metadata length=" + metadata_length);
           return null;  // TODO(tsuna): Add a watch to wait until the file changes.
         }
-        short offset = (short) (1 + 4 + metadata_length);
+
+        // For offset, use type int instead of short. Variable metadata_length
+        // has type int and may have a value up to 65000 (see guard condition
+        // above), so adding 1 + 4 = 5 to that can overflow a short-typed
+        // variable, which has a maximum value of 32767.
+        int offset = 1 + 4 + metadata_length;
 
         final int pbuf_magic = Bytes.getInt(data, offset);
         if (pbuf_magic != PBUF_MAGIC) {
@@ -5042,6 +5053,8 @@ public final class HBaseClient {
                     + ", invalid magic number=" + pbuf_magic);
           return null;  // TODO(tsuna): Add a watch to wait until the file changes.
         }
+
+        // The previously-short-valued offset could have also overflowed here.
         offset += 4;
 
         final String ip;
