@@ -138,7 +138,12 @@ public class TestRefreshingSSLContext {
 
   private static KeyPair genRsa(final int bits) throws Exception {
     final KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA");
-    gen.initialize(bits);
+    // Test-only key generation. Some callers (e.g., parsePkcs1AcrossKeySizes()
+    // within this test suite) deliberately pass 1024 bits to exercise the
+    // 1-byte long-form DER length prefix in the PKCS#1 parser; these keys are
+    // never used to protect real data, so the insufficient-key-size rule does
+    // not apply here.
+    gen.initialize(bits); // codeql[java/insufficient-key-size]
     return gen.generateKeyPair();
   }
 
@@ -250,7 +255,12 @@ public class TestRefreshingSSLContext {
   @Test
   public void parsePkcs1AcrossKeySizes() throws Exception {
     // 1024/2048/4096 exercise short-form and 1- and 2-byte long-form DER
-    // length prefixes in the PKCS#8 wrapper.
+    // length prefixes in the PKCS#1 structure. 1024 is kept on purpose: a
+    // 128-byte modulus is the only size that produces a 1-byte long-form
+    // length prefix, while 2048-bit and 4096-bit moduli produce 2-byte
+    // prefixes, so dropping it would lose that parser coverage. The key is
+    // test-only; the resulting insufficient-key-size alert is suppressed inline
+    // in genRsa().
     for (final int bits : new int[] { 1024, 2048, 4096 }) {
       final RSAPrivateCrtKey orig = (RSAPrivateCrtKey) genRsa(bits).getPrivate();
       final RSAPrivateKey parsed = Whitebox.invokeMethod(
