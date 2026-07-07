@@ -23,9 +23,14 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+# The full PowerMock framework was dropped; only powermock-reflect (a standalone
+# reflection helper, works on JDK 8-17) is still used -- see pom.xml.in. The old
+# powermock-mockito-release-full "-full" assembly jar was never published for the
+# 2.x line, so fetch powermock-reflect here to match the POM dependency. URL moved
+# to repo1.maven.org (central.maven.org was retired).
 POWERMOCK_MOCKITO_VERSION := 2.0.9
-POWERMOCK_MOCKITO := third_party/powermock/powermock-mockito-release-full-$(POWERMOCK_MOCKITO_VERSION)-full.jar
-POWERMOCK_MOCKITO_BASE_URL := http://central.maven.org/maven2/org/powermock/powermock-mockito-release-full/$(POWERMOCK_MOCKITO_VERSION)
+POWERMOCK_MOCKITO := third_party/powermock/powermock-reflect-$(POWERMOCK_MOCKITO_VERSION).jar
+POWERMOCK_MOCKITO_BASE_URL := $(ASYNCHBASE_THIRD_PARTY_BASE_URL)/org/powermock/powermock-reflect/$(POWERMOCK_MOCKITO_VERSION)
 
 $(POWERMOCK_MOCKITO): $(POWERMOCK_MOCKITO).md5
 	set dummy "$(POWERMOCK_MOCKITO_BASE_URL)" "$(POWERMOCK_MOCKITO)"; shift; $(FETCH_DEPENDENCY)

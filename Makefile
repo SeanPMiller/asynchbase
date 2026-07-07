@@ -62,11 +62,17 @@ PROTOBUF_GEN_DIR = $(top_builddir)/src/org/hbase/async/generated
 
 BUILT_SOURCES := $(asynchbase_PROTOS:protobuf/%.proto=$(PROTOBUF_GEN_DIR)/%PB.java)
 
+# Bundle the .proto schema files into the jar root, matching the Maven build
+# (protobuf-maven-plugin adds protoSourceRoot to the artifact). Paths are relative
+# to $(top_builddir) because the jar step runs there.
+proto_jar_entries := $(foreach p,$(asynchbase_PROTOS),-C ../protobuf $(notdir $(p)))
+
 asynchbase_SOURCES := \
 	src/AppendRequest.java	\
 	src/AtomicIncrementRequest.java	\
 	src/MultiColumnAtomicIncrementRequest.java	\
 	src/BatchableRpc.java	\
+	src/BatchGet.java	\
 	src/BinaryComparator.java	\
 	src/BinaryPrefixComparator.java	\
 	src/BitComparator.java	\
@@ -147,7 +153,7 @@ asynchbase_SOURCES := \
 	src/auth/ClientAuthProvider.java	\
 	src/auth/KerberosClientAuthProvider.java	\
 	src/auth/Login.java	\
-	src/auth/RefreshingSSLContext	\
+	src/auth/RefreshingSSLContext.java	\
 	src/auth/SimpleClientAuthProvider.java	\
 	src/auth/TempMTLSClientAuthProvider.java	\
 	src/jsr166e/LongAdder.java	\
@@ -223,10 +229,10 @@ test_LIBADD := \
         $(jar)
 
 package_dir := $(subst .,/,$(package))
-AM_JAVACFLAGS := -Xlint -source 6 -target 6
+AM_JAVACFLAGS := -Xlint -g -source 8 -target 8
 JAVAC := javac
 JVM_ARGS :=
-PROTOC := protoc
+PROTOC ?= $(firstword $(wildcard $(HOME)/.m2/repository/com/google/protobuf/protoc/$(PROTOBUF_VERSION)/protoc-$(PROTOBUF_VERSION)-*.exe) protoc)
 classes := $(asynchbase_SOURCES:src/%.java=$(top_builddir)/$(package_dir)/%.class) \
  $(protobuf_SOURCES:src/%.java=$(top_builddir)/com/google/%.class) \
  $(asynchbase_PROTOS:protobuf/%.proto=$(top_builddir)/$(package_dir)/generated/%PB.class)
@@ -249,9 +255,12 @@ $(top_builddir)/.javac-stamp: $(top_builddir)/.javac-protobuf-stamp $(asynchbase
 
 $(PROTOBUF_GEN_DIR)/%PB.java: protobuf/%.proto
 	@mkdir -p $(proto_generated_builddir)
-	@case `$(PROTOC) --version` in \
-	  (*2.5*) :;; \
-	  (*) echo You need the protobuf compiler v2.5 2>&1; exit 1;; \
+	@case "$(PROTOC)" in */*) chmod +x "$(PROTOC)" 2>/dev/null || : ;; esac
+	@case `$(PROTOC) --version 2>/dev/null` in \
+	  (libprotoc\ 2[0-9].*|libprotoc\ 3.*) :;; \
+	  (*) echo "asynchbase needs protoc 3.x to match the protobuf-java $(PROTOBUF_VERSION) runtime." >&2; \
+	      echo "Install one (e.g. 'brew install protobuf') or run 'mvn generate-sources' once to fetch protoc $(PROTOBUF_VERSION), then re-run make." >&2; \
+	      exit 1;; \
 	esac
 	$(PROTOC) -Iprotobuf --java_out=$(proto_generated_builddir) $<
 
@@ -311,6 +320,7 @@ $(top_builddir)/manifest: $(top_builddir)/.javac-stamp .git/HEAD
 
 $(jar): $(top_builddir)/manifest $(top_builddir)/.javac-stamp $(classes)
 	cd $(top_builddir) && jar cfm `basename $(jar)` manifest $(classes_with_nested_classes) \
+	         $(proto_jar_entries) \
          || { rv=$$? && rm -f `basename $(jar)` && exit $$rv; }
 #                       ^^^^^^^^^^^^^^^^^^^^^^^
 # I've seen cases where `jar' exits with an error but leaves a partially built .jar file!

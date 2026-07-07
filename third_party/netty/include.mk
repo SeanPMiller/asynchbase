@@ -26,7 +26,7 @@
 NETTY_MAJOR_VERSION = 3.9
 NETTY_VERSION := 3.9.8.Final
 NETTY := third_party/netty/netty-$(NETTY_VERSION).jar
-NETTY_BASE_URL := https://repo1.maven.org/maven2/io/netty/netty/$(NETTY_VERSION)
+NETTY_BASE_URL := $(ASYNCHBASE_THIRD_PARTY_BASE_URL)/io/netty/netty/$(NETTY_VERSION)
 
 $(NETTY): $(NETTY).md5
 	set dummy "$(NETTY_BASE_URL)" "$(NETTY)"; shift; $(FETCH_DEPENDENCY)
